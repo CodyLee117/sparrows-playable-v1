@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sparrows — Tap to Spell</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&display=swap" rel="stylesheet">
+<script src="mraid.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Nunito', '-apple-system', system-ui, sans-serif; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  /* Deep forest green matching actual gameplay */
+  body { background: #3D5A3F; }
+
+  #stage { position: relative; width: 100%; height: 100%; overflow: hidden; }
+
+  /* --- Map background — bg.png 1080×3102, anchored to bottom (camera at the
+         birdhouse hooks). Houses are placed/animated relative to the bg image
+         in JS so they stay aligned at any stage size. The whole world pans
+         slowly up and down via the .world wrapper. */
+  .world {
+    position: absolute; inset: 0;
+    z-index: 0;
+    animation: panUpDown 56s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+  @keyframes panUpDown {
+    0%   { transform: translateY(0); }
+    100% { transform: translateY(var(--pan-max, 0px)); }
+  }
+
+  .bg-img {
+    position: absolute;
+    pointer-events: none;
+    z-index: 0;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .house {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1;
+    will-change: transform;
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+  .house img { width: 100%; height: 100%; display: block; }
+  .house.h1 { animation: swingA 4.2s ease-in-out infinite; }
+  .house.h2 { animation: swingB 5.1s ease-in-out infinite; }
+  @keyframes swingA {
+    0%,100% { transform: rotate(-4deg); }
+    50%     { transform: rotate(4deg); }
+  }
+  @keyframes swingB {
+    0%,100% { transform: rotate(4.5deg); }
+    50%     { transform: rotate(-4.5deg); }
+  }
+
+  @keyframes idleBobble  { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes idleBobble2 { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  @keyframes hop         { 0%,80%,100% { transform: translateY(0); } 85% { transform: translateY(-12px); } 90% { transform: translateY(0); } }
+  @keyframes glide {
+    0%   { left: -120px; top: 14%; opacity: 0; }
+    10%  { opacity: 0.7; }
+    50%  { top: 11%; }
+    90%  { opacity: 0.7; }
+    100% { left: 110%; top: 14%; opacity: 0; }
+  }
+
+  /* --- Top banner --- */
+  .banner {
+    position: absolute; top: 4%; left: 50%; transform: translateX(-50%);
+    background: rgba(255,253,243,0.96);
+    color: #3F2A12;
+    padding: 9px 18px; border-radius: 14px;
+    font-size: 15px; font-weight: 600;
+    text-align: center; line-height: 1.25;
+    box-shadow: 0 3px 12px rgba(0,0,0,0.30);
+    z-index: 50; max-width: 90%;
+  }
+  .banner .target { color: #C2410C; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  .banner .hint-line { display: block; font-size: 11px; color: #6B4A2A; font-weight: 500; margin-top: 2px; letter-spacing: 0.3px; }
+
+  /* --- Selection bar at bottom (matches actual game) --- */
+  .selection-bar {
+    position: absolute;
+    bottom: 5%; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center;
+    z-index: 30;
+    width: 90%; max-width: 320px;
+  }
+  .word-output {
+    display: flex; gap: 4px;
+    min-height: 50px; align-items: center;
+    margin-bottom: 4px;
+  }
+  .word-slot {
+    width: 36px; height: 46px;
+    background: rgba(255,253,243,0.28);
+    border: 1px dashed rgba(255,253,243,0.4);
+    border-radius: 9px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: rgba(255,253,243,0.4);
+    font-family: 'Nunito', '-apple-system', system-ui, sans-serif;
+    transition: all 0.18s ease;
+  }
+  .word-slot .ws-letter { font-size: 22px; font-weight: 700; line-height: 1; }
+  .word-slot .ws-pts    { font-size: 9px; font-weight: 700; margin-top: 2px; line-height: 1; }
+  .word-slot.filled {
+    background: #FFFFFF;
+    border: 0;
+    color: #B8893A;
+    transform: scale(1.04);
+    box-shadow: 6px 2px 0 rgba(0,0,0,0.2);   /* matches selected SVG spec */
+    animation: slotIn 0.3s ease-out;
+  }
+  .word-slot.filled .ws-pts { color: #B8893A; }
+  @keyframes slotIn {
+    0%   { transform: translateY(-12px) scale(0.7); opacity: 0; }
+    60%  { transform: translateY(0) scale(1.12); opacity: 1; }
+    100% { transform: translateY(0) scale(1.04); }
+  }
+  .points-label {
+    color: #FFFEF8;
+    font-size: 14px; font-weight: 700;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+    letter-spacing: 0.4px;
+    margin-bottom: 8px;
+  }
+  .points-label .pts-num { color: #FFD173; font-size: 20px; }
+
+  /* Submit / Clear buttons */
+  .action-row {
+    display: flex; gap: 10px; align-items: center;
+  }
+  .btn {
+    border: none; cursor: pointer;
+    font-family: 'Nunito', '-apple-system', system-ui, sans-serif; font-weight: 700;
+    padding: 11px 24px; border-radius: 26px;
+    font-size: 16px; letter-spacing: 0.6px;
+    transition: transform 0.12s, opacity 0.2s, box-shadow 0.2s;
+  }
+  .btn:active { transform: translateY(2px); }
+  .btn.clear {
+    background: rgba(255,253,243,0.85);
+    color: #6B4A2A;
+    box-shadow: 0 3px 0 rgba(80,55,25,0.6), 0 4px 10px rgba(0,0,0,0.25);
+  }
+  .btn.submit {
+    background: linear-gradient(180deg, #FFFEF8 0%, #F2EAD0 100%);
+    color: #B8893A;
+    box-shadow: 0 3px 0 #8C6628, 0 4px 10px rgba(0,0,0,0.3);
+    opacity: 0.45;
+    pointer-events: none;
+  }
+  .btn.submit.ready {
+    opacity: 1; pointer-events: auto;
+    color: #C2410C;
+    animation: submitPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes submitPulse {
+    0%,100% { transform: scale(1); }
+    50%     { transform: scale(1.06); }
+  }
+  .btn.submit.hint::after {
+    content: ''; position: absolute; inset: -6px;
+    border-radius: 32px;
+    border: 3px solid #FFFEF8;
+    pointer-events: none;
+    animation: hintPulse 1s ease-in-out infinite;
+  }
+
+  /* --- Tile board --- */
+  .board {
+    position: absolute;
+    top: 22%; left: 50%; transform: translateX(-50%);
+    width: 360px; height: 320px;
+    z-index: 5;
+  }
+  /* Real Sparrows tile per supplied SVGs:
+     Unlocked  → 40×62 rx=16, fill #FFB000, drop-shadow 6px x 2px y, no blur, opacity 0.2
+     Locked    → fill #292429, 1px stroke #FFB000, same shadow
+     Selected  → fill #FFFFFF, drop-shadow 37px x 15px y, no blur, opacity 0.2 (in-tray look) */
+  .tile {
+    position: absolute;
+    width: 56px; height: 86px;          /* 40:62 ratio scaled to 56:86 */
+    border-radius: 16px;
+    background: #FFB000;
+    box-shadow: 6px 2px 0 rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: #1A1014;
+    font-family: 'Nunito', '-apple-system', system-ui, sans-serif;
+    font-weight: 700; font-size: 30px;
+    line-height: 1;
+    cursor: pointer;
+    transition: transform 0.18s cubic-bezier(.5,1.5,.6,1.0), background 0.2s, color 0.2s, opacity 0.25s;
+    padding-top: 14px;
+    border: 0;
+  }
+  .tile .points { font-size: 11px; font-weight: 700; margin-top: 8px; color: #1A1014; opacity: 0.9; }
+  .tile.layer-1 { z-index: 10; }
+  .tile.layer-1:active { transform: translate(3px, 1px); box-shadow: 3px 1px 0 rgba(0,0,0,0.18); }
+  .tile.layer-1.removing { pointer-events: none; animation: tileLift 0.55s ease-in forwards; }
+
+  /* Selected: tile has flown to the tray — ghost the board slot */
+  .tile.layer-1.selected {
+    opacity: 0.18;
+    pointer-events: none;
+    transform: scale(0.92);
+    box-shadow: none;
+    background: #FFFFFF;
+    color: #B8893A;
+    transform: translateY(-3px);
+    box-shadow: 12px 6px 0 rgba(0,0,0,0.2);   /* scaled-down version of 37/15 spec for our tile size */
+    z-index: 11;
+  }
+  .tile.layer-1.selected .points { color: #B8893A; }
+
+  /* Locked: SVG spec — dark fill with orange border */
+  .tile.layer-0 {
+    z-index: 4;
+    background: #292429;
+    border: 1px solid #FFB000;
+    color: #FFB000;
+    box-shadow: 6px 2px 0 rgba(0,0,0,0.25);
+    pointer-events: none;
+    transform: scale(0.94);
+    opacity: 0.95;
+    padding-top: 13px;
+  }
+  .tile.layer-0 .points { color: #FFB000; opacity: 0.85; }
+  .tile.layer-0.clearing { animation: tileFade 0.55s ease-out forwards; }
+
+  /* Unlock flip — when a tile becomes accessible after a submit, it does a 3D flip
+     from locked face (dark + orange border) to unlocked face (orange) */
+  .tile.layer-1.unlocking {
+    animation: unlockFlip 0.6s ease-in-out;
+    transform-origin: center;
+  }
+  @keyframes unlockFlip {
+    0%   { transform: perspective(400px) rotateY(0deg);   background: #292429; color: #FFB000; border: 1px solid #FFB000; }
+    49%  { transform: perspective(400px) rotateY(90deg);  background: #292429; color: #FFB000; border: 1px solid #FFB000; }
+    51%  { transform: perspective(400px) rotateY(-90deg); background: #FFB000; color: #1A1014; border: 0; }
+    100% { transform: perspective(400px) rotateY(0deg);   background: #FFB000; color: #1A1014; border: 0; }
+  }
+
+  /* Flyer — temporary tile that animates from board → tray (and back on deselect) */
+  .tile-flyer {
+    position: fixed;
+    border-radius: 16px;
+    background: #FFFFFF;
+    color: #B8893A;
+    box-shadow: 12px 6px 0 rgba(0,0,0,0.2);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: 'Nunito', '-apple-system', system-ui, sans-serif;
+    font-weight: 700; font-size: 30px;
+    pointer-events: none;
+    z-index: 50;
+    transition: transform 0.28s cubic-bezier(.4,.9,.5,1.1), opacity 0.28s ease;
+    will-change: transform, opacity;
+  }
+  .word-slot.filled { cursor: pointer; pointer-events: auto; }
+  @keyframes tileLift {
+    0%   { transform: translateY(0) scale(1) rotate(0deg); opacity: 1; }
+    50%  { transform: translateY(-32px) scale(1.08) rotate(-7deg); opacity: 0.95; }
+    100% { transform: translateY(-64px) scale(0.55) rotate(-16deg); opacity: 0; }
+  }
+  @keyframes tileFade {
+    0%   { opacity: 0.72; transform: scale(0.92); }
+    50%  { opacity: 0.5; transform: scale(0.95); }
+    100% { opacity: 0; transform: scale(0.7) translateY(8px); }
+  }
+
+  .tile.hint::after {
+    content: ''; position: absolute; inset: -6px;
+    border-radius: 18px;
+    border: 3px solid #FFFEF8;
+    box-shadow: 0 0 14px rgba(255,254,248,0.8);
+    animation: hintPulse 1s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes hintPulse {
+    0%,100% { transform: scale(1); opacity: 0.85; }
+    50%     { transform: scale(1.06); opacity: 1; }
+  }
+
+  /* --- Pointing arrow --- */
+  .arrow {
+    position: absolute; width: 36px; height: 36px;
+    z-index: 9; pointer-events: none;
+    transition: top 0.35s ease, left 0.35s ease;
+    opacity: 0;
+  }
+  .arrow.visible { opacity: 1; animation: bounceArrow 0.7s ease-in-out infinite; }
+  .arrow::before {
+    content: ''; position: absolute;
+    top: 0; left: 50%; transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 14px solid transparent;
+    border-right: 14px solid transparent;
+    border-top: 22px solid #FFFEF8;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+  }
+  @keyframes bounceArrow { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+  /* --- Feather burst --- */
+  .feather {
+    position: absolute; width: 12px; height: 22px;
+    background: linear-gradient(180deg, #FFF 0%, #FBBF24 100%);
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    pointer-events: none; opacity: 0; z-index: 12;
+  }
+  .feather.burst { animation: featherBurst 1.2s ease-out forwards; }
+  @keyframes featherBurst {
+    0%   { opacity: 1; transform: translate(0, 0) rotate(0deg) scale(0.5); }
+    100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--r)) scale(1.2); }
+  }
+
+  /* --- Score popup --- */
+  .score-pop {
+    position: absolute; top: 22%; left: 50%; transform: translateX(-50%);
+    color: #FFD075; font-weight: 800; font-size: 44px;
+    pointer-events: none; opacity: 0; z-index: 14;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.55);
+  }
+  .score-pop.show { animation: scorePop 1s ease-out forwards; }
+  @keyframes scorePop {
+    0%   { opacity: 0; transform: translateX(-50%) translateY(20px) scale(0.6); }
+    30%  { opacity: 1; transform: translateX(-50%) translateY(0) scale(1.1); }
+    100% { opacity: 0; transform: translateX(-50%) translateY(-40px) scale(1); }
+  }
+
+  /* --- End card --- */
+  #endcard {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg, #4A6E47 0%, #3D5A3F 70%, #2D4332 100%);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 24px;
+    z-index: 100;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.5s ease;
+  }
+  #endcard.show { opacity: 1; pointer-events: auto; }
+  #endcard .logo {
+    width: 130px; height: 130px;
+    border-radius: 28px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    animation: logoIn 0.6s ease-out;
+  }
+  @keyframes logoIn { from { transform: scale(0.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  #endcard h1 {
+    margin-top: 22px; color: #FFFEF8;
+    font-size: 28px; font-weight: 700; text-align: center;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+  #endcard p {
+    margin-top: 10px; color: #E8DDC2;
+    font-size: 16px; text-align: center;
+    max-width: 280px; line-height: 1.45;
+  }
+  .install {
+    margin-top: 32px;
+    background: linear-gradient(180deg, #FFD173 0%, #F0B14F 100%);
+    color: #2C1B0C; border: 2px solid #B8893A;
+    padding: 16px 48px; border-radius: 32px;
+    font-size: 20px; font-weight: 700; letter-spacing: 1px;
+    box-shadow: 0 4px 0 #8C6628, 0 6px 16px rgba(0,0,0,0.3);
+    cursor: pointer; font-family: 'Nunito', '-apple-system', system-ui, sans-serif;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .install:active { transform: translateY(2px); box-shadow: 0 2px 0 #8C6628, 0 3px 8px rgba(0,0,0,0.3); }
+  @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+
+  #endcard .bird { position: absolute; }
+  #endcard .bird.eb1 { top: 14%; left: 14%; width: 42px; height: 80px; background-image: url('assets/birds/bird_orange.png'); animation: idleBobble 2s ease-in-out infinite; }
+  #endcard .bird.eb2 { top: 14%; right: 14%; width: 70px; height: 88px; background-image: url('assets/birds/bird_gray.png'); animation: idleBobble2 2.3s ease-in-out infinite; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <!-- Map background — bg + houses live in a panning "world" div so they
+       move together as the camera drifts up and down. -->
+  <div class="world" id="world">
+    <img class="bg-img" id="bgImg" src="assets/bg/bg.png" alt="">
+    <div class="house h1" id="house1"><img src="assets/bg/birdhouse1.png" alt=""></div>
+    <div class="house h2" id="house2"><img src="assets/bg/birdhouse2.png" alt=""></div>
+  </div>
+
+  <div class="banner" id="banner">
+    Spell <span class="target" id="targetWord">NEST</span>
+    <span class="hint-line">Tap the top tiles to spell</span>
+  </div>
+  <div class="arrow" id="arrow"></div>
+  <div class="board" id="board"></div>
+  <div class="score-pop" id="scorePop">+50</div>
+  <div class="selection-bar">
+    <div class="word-output" id="wordOutput"></div>
+    <div class="points-label"><span class="pts-num" id="ptsNum">0</span> points</div>
+    <div class="action-row">
+      <button class="btn clear" id="clearBtn">Clear</button>
+      <button class="btn submit" id="submitBtn" style="position: relative;">Submit</button>
+    </div>
+  </div>
+</div>
+
+<div id="endcard">
+  <div class="bird eb1"></div>
+  <div class="bird eb2"></div>
+  <img class="logo" src="assets/ui/logo.png" alt="Sparrows: Word Strategy">
+  <h1>Sparrows: Word Strategy</h1>
+  <p>The relaxing word puzzle for everyone. Stack tiles, spell words, set your own pace.</p>
+  <button class="install" id="installBtn">PLAY FREE</button>
+</div>
+
+<script>
+/* ============================================================ MRAID ============================================================ */
+(function() {
+  function whenReady(cb) {
+    if (typeof mraid !== 'undefined' && mraid.getState && mraid.getState() === 'loading') {
+      mraid.addEventListener('ready', cb);
+    } else cb();
+  }
+  window._sparrowsClick = function() {
+    var url = 'https://apps.apple.com/app/id1606645393';
+    if (typeof mraid !== 'undefined' && mraid.open) {
+      try { mraid.open(url); return; } catch (e) {}
+    }
+    window.open(url, '_blank');
+  };
+  whenReady(function() {});
+})();
+
+/* ============================================================ Letter point values (Scrabble-ish, matching Sparrows feel) ============================================================ */
+const LETTER_POINTS = {
+  A:1,B:3,C:3,D:2,E:1,F:4,G:2,H:4,I:1,J:8,K:5,L:1,M:3,N:1,O:1,P:3,Q:10,R:1,S:1,T:1,U:1,V:4,W:4,X:8,Y:4,Z:10
+};
+function pts(letter) { return LETTER_POINTS[letter] || 1; }
+
+/* ============================================================ Game state ============================================================ */
+const STATE = {
+  phase: 'tutorial',
+  tiles: [],     /* unified array of {id, letter, layer, col, blockedBy:[ids], removed} */
+  selected: [],  /* tile ids in tap order */
+  targetWord: 'NEST',
+  wordsCompleted: 0,
+  locked: false,
+};
+
+/* Trimmed dictionary — all 2–6 letter words spellable from the playable’s letter pool
+   (A,B,D,E,G,H,I,L,M,N,O,P,R,S,T,U). Each letter appears at most once on the boards,
+   so words with letter repeats are excluded. 6925 words. */
+const VALID_WORDS = new Set("ABDEST ABED ABEIGH ABET ABHOR ABIDE ABIDER ABILO ABIR ABLE ABLER ABLEST ABLINS ABLUDE ABLUSH ABMHO ABNET ABODE ABOHM ABOIL ABORD ABORT ABOUND ABOUT ABOUTS ABRET ABRIM ABRIN ABRUPT ABSENT ABSIT ABSMHO ABSOHM ABSUME ABSURD ABU ABURST ABUSE ABUSER ABUT AD ADE ADEPT ADET ADIEU ADION ADIT ADITUS ADLET ADMI ADMIN ADMIRE ADMIT ADO ADOBE ADOPT ADORE ADORN ADRIP ADROIT ADROP ADRUE ADSORB ADULT ADUST AE AEGIS AEOLID AEON AER AERO AERUGO AES AGE AGED AGEN AGENT AGER AGILE AGIO AGIST AGLET AGLINT AGNEL AGNUS AGO AGON AGONE AGOUTI AGRE AGRIN AGRISE AGRITO AGROM AGROPE AGUE AGUISH AGUSH AGUST AH AHEM AHIND AHINT AHO AHONG AHORSE AHU AHUM AHUNT AI AID AIDE AIDER AIEL AIGLET AIL AILE AILURO AIM AIMER AINHUM AINT AION AIR AIRE AIRT AISLE AISLED AIT AL ALB ALBE ALBEDO ALBEIT ALBINO ALBITE ALBUGO ALBUM ALBURN ALBUS ALDER ALDERN ALDIM ALDIME ALDINE ALDOSE ALE ALEM ALEN ALEPH ALEPHS ALEPOT ALERT ALGEDO ALGID ALGIN ALGINE ALGIST ALGOID ALGOR ALGOUS ALGUM ALIEN ALIGHT ALIGN ALIN ALIPED ALISH ALISO ALISON ALISP ALIST ALIT ALITE ALME ALMON ALMOND ALMOST ALMOUS ALMS ALMUD ALMUDE ALMUG ALN ALO ALOD ALOE ALOED ALOID ALOIN ALONE ALONG ALOP ALOSE ALOUD ALP ALPHOS ALPIEU ALPINE ALPIST ALSO ALT ALTER ALTERN ALTHO ALTIN ALTO ALTOUN ALTUN ALUM ALUMNI ALURE AM AMBER AMBIER AMBIT AMBLE AMBLER AMBO AMBON AMBOS AMBUSH AME AMELU AMELUS AMEN AMEND AMENDS AMENT AMI AMID AMIDE AMIDO AMIDOL AMIDON AMIDST AMIL AMIN AMINE AMINO AMIR AMLI AMLONG AMOBER AMOLE AMONG AMOR AMORET AMORT AMOTUS AMOUNT AMOUR AMP AMPER AMPHID AMPLE AMPUL AMSEL AMT AMULET AMUSE AMUSED AMUSER AN AND ANDROL ANES ANGEL ANGER ANGILD ANGLE ANGLED ANGLER ANGO ANGOR ANGST ANGUID ANGUIS ANI ANIGH ANIGHT ANIL ANILE ANIME ANIMUS ANIS ANISE ANISUM ANODE ANOIL ANOLE ANOLI ANORTH ANOTUS ANSU ANT ANTDOM ANTE ANTES ANTHEM ANTHER ANTI ANTLER ANTRE ANTRUM ANTU ANUS ANUSIM AORIST APE APEDOM APER APERT APHID APING APIO APIOLE APIOSE APISH APISM APLITE APLOMB APLOME APOD APOISE APORT APOUT APRON APSE APT APULSE AR ARBUTE ARDEB ARDENT ARDISH ARDU ARE ARED AREITO AREND ARENG ARENT ARGEL ARGENT ARGHEL ARGIL ARGO ARGOL ARGON ARGOT ARGUE ARGUTE ARID ARIDGE ARIEL ARIGHT ARIGUE ARIL ARILED ARIOSE ARIOT ARISE ARISEN ARIST ARITE ARLES ARM ARMED ARMET ARMIED ARMIL ARMING ARMLET ARMPIT ARMS ARN ARNI ARNUT AROID AROINT AROSE AROUND AROUSE ARPEN ARPENT ARSE ARSENO ARSHIN ARSINE ARSINO ARSLE ARSON ART ARTEL ARTHEL ARU ARUI ARUMIN AS ASE ASEM ASH ASHEN ASHET ASHINE ASHORE ASHPIT ASHUR ASIDE ASIDEU ASIMEN ASLOP ASLOPE ASMILE ASNORT ASOP ASOR ASOUTH ASP ASPEN ASPER ASPIRE ASPORT ASPOUT AST ASTER ASTERN ASTIR ASTOR AT ATE ATELO ATES ATHING ATHROB ATIMON ATIP ATIS ATLE ATLOID ATMID ATMO ATMOS ATOM ATONE ATONER ATOP ATOUR ATRIP ATRIUM ATROUS ATULE ATUNE AUBE AUDILE AUDIO AUDION AUDIT AUGE AUGEN AUGEND AUGER AUGH AUGHT AUGITE AUH AULD AULOI AULOS AUM AUMIL AUMRIE AUNE AUNT AUNTIE AURIDE AURIN AURIST AURITE AUTE AUTEM AUTHOR AUTISM AUTO BA BAD BADE BADGE BADGER BAE BAG BAGEL BAGNIO BAGNUT BAGO BAGRE BAH BAHO BAHOE BAHT BAHUR BAHUT BAIL BAILER BAILOR BAIN BAIRN BAIT BAITER BAITH BAL BALD BALDEN BALDER BALE BALEI BALER BALI BALINE BALM BALTEI BALTER BALU BALUT BAM BAMOTH BAN BAND BANDE BANDER BANDHU BANDI BANDIE BANDIT BANDLE BANDO BANDOG BANE BANG BANGE BANGER BANGLE BANI BANIG BANISH BANT BANTER BAP BAR BARD BARDEL BARDIE BARDO BARE BARGE BARGH BARI BARID BARIE BARILE BARING BARIS BARISH BARIT BARITE BARIUM BARM BARN BAROI BARON BARONG BARSE BARSOM BARTH BARTON BARU BAS BASE BASED BASH BASIL BASIN BASION BASOID BASON BASOTE BAST BASTE BASTEN BASTER BASTO BASTON BAT BATE BATED BATEL BATER BATH BATHE BATHER BATHOS BATING BATINO BATLON BATOID BATON BATS BATULE BAUD BAUL BAUN BAUNO BAUSON BE BEAD BEAL BEAM BEAN BEANO BEANT BEAR BEARD BEARM BEAST BEAT BEATH BEATUS BEAU BEAUT BEAUTI BED BEDAMN BEDAMP BEDASH BEDIM BEDIN BEDIP BEDIRT BEDLAM BEDLAR BEDMAN BEDOG BEDOLT BEDOT BEDPAN BEDRAL BEDRIP BEDROP BEDRUG BEDUNG BEDUR BEDUST BEG BEGAD BEGANI BEGAR BEGARI BEGASH BEGAT BEGAUD BEGILD BEGIN BEGIRD BEGLAD BEGO BEGOHM BEGOUD BEGRIM BEGUM BEGUN BEGUT BEHAP BEHIND BEHINT BEHN BEHOLD BEHORN BEHUNG BEING BEIRA BEISA BEL BELA BELAH BELAM BELAR BELARD BELASH BELAUD BELD BELDAM BELGA BELION BELOAM BELOID BELONG BELORD BELOUT BELT BELTON BELUGA BEMA BEMAD BEMAIL BEMAN BEMAR BEMAT BEMAUL BEMIST BEMOAN BEMOAT BEMOIL BEMOLT BEMUD BEN BENA BENAMI BEND BENDA BENG BENI BENO BENSH BENSHI BENT BEPAID BEPART BEPAT BEPUN BER BERAIN BERAPT BERAT BERG BERGUT BERITH BERLIN BERM BERTH BERUST BES BESA BESAN BESHAG BESHOD BESIGH BESIN BESING BESIT BESLAP BESLUR BESMUT BESOIL BESOM BESOT BESOUL BESOUR BESPIN BESPIT BESPOT BESRA BEST BESTAR BESTIR BESTUD BESUIT BET BETA BETAG BETAIL BETH BETIS BETOIL BETRAP BETRIM BETSO BHALU BHANG BHANGI BHAT BHUNGI BHUT BIAS BID BIDAR BIDE BIDENT BIDER BIDET BIELD BIEN BIER BIG BIGA BIGHA BIGHT BIGLOT BIGNOU BIGOT BILDAR BILE BILGE BILO BILSH BIMANE BIN BINAL BINATE BIND BINDER BINDLE BINE BING BINGE BINGLE BINGO BINH BINO BINODE BINOUS BINT BIOD BIOGEN BIOME BION BIORAL BIOS BIOSE BIOTA BIPED BIPOD BIRD BIRL BIRLE BIRMA BIRN BIRSE BIRSLE BIRTH BIS BISALT BISHOP BISMAR BISON BISTER BISTRO BIT BITE BITER BITO BITUME BIUNE BIUREA BIURET BLAD BLADE BLADER BLAE BLAH BLAIN BLAIR BLAME BLAMED BLAMER BLAN BLAND BLARE BLART BLAS BLASE BLASH BLAST BLAT BLATE BLEAR BLEAT BLED BLEND BLENT BLEO BLEST BLET BLIGHT BLIMP BLIND BLIP BLITE BLITHE BLO BLOAT BLONDE BLORE BLOT BLOUSE BLOUT BLUE BLUER BLUES BLUET BLUING BLUISH BLUISM BLUNGE BLUNT BLUP BLUR BLURT BLUSH BO BOA BOAR BOARD BOAST BOAT BOATER BOATIE BOD BODE BODEGA BODEN BODER BODGE BODGER BODHI BODIER BODING BODLE BOG BOGA BOGAN BOGARD BOGART BOGIE BOGIER BOGLE BOGLET BOGMAN BOGUE BOGUM BOGUS BOHEA BOID BOIL BOILED BOILER BOIST BOLA BOLAR BOLD BOLDEN BOLE BOLED BOLIDE BOLIS BOLT BOLTER BOLTI BOLUS BOM BOMA BON BONAGH BONAIR BOND BONDAR BONDER BONE BONED BONER BONG BONSAI BONUS BOP BOR BORA BORAGE BORAL BORATE BORD BORDEL BORE BOREAD BOREAL BOREAN BORG BORGH BORH BORIDE BORINE BORING BORISH BORISM BORN BORNE BORSHT BORT BOSE BOSER BOSH BOSHER BOSN BOSUN BOT BOTA BOTE BOTH BOTHER BOUD BOUGAR BOUGE BOUGET BOUGH BOUGHT BOUGIE BOULE BOUN BOUND BOURD BOURG BOURN BOURSE BOUSE BOUSER BOUT BRA BRAD BRAE BRAG BRAID BRAIL BRAIN BRAINS BRAISE BRAN BRAND BRANLE BRANT BRASH BRAT BREAD BREAM BREAST BREATH BRED BREDI BREGMA BREHON BREI BRENT BRET BRETH BRIDAL BRIDE BRIDGE BRIDLE BRIG BRIGHT BRIM BRIN BRINE BRING BRIT BRITH BROAD BROD BROG BROGAN BROGUE BROIL BROLGA BROMA BROMAL BROME BROSE BROT BROTAN BROTH BROUGH BRUANG BRUGH BRUIN BRUISE BRUIT BRUMAL BRUME BRUNET BRUNT BRUSH BRUT BRUTAL BRUTE BU BUAL BUD BUDA BUDGE BUDGER BUDGET BUDLET BUG BUGAN BUGDOM BUGLE BUGLED BUGLER BUGLET BUGRE BUHL BUHR BUILD BUILT BUIST BULGE BULGER BULSE BULT BULTER BUM BUMP BUMPER BUN BUNA BUND BUNDER BUNDLE BUNG BUNGLE BUNGO BUNT BUNTAL BUNTED BUNTER BUR BURAN BURAO BURD BURDEN BURDIE BURDON BURE BUREL BURET BURG BURGH BURGLE BURI BURIAL BURIAN BURIED BURIN BURION BURL BURLAP BURLED BURLET BURN BURNED BURNET BURNIE BURNT BURO BURP BURSA BURSAL BURSE BURST BURT BURTON BUS BUSH BUSHED BUSHEL BUSHER BUSHI BUSIED BUSINE BUSMAN BUST BUSTED BUSTER BUSTLE BUT BUTANE BUTEIN BUTINE BUTLER DA DAB DABLET DAE DAEMON DAER DAG DAGESH DAGS DAH DAIMEN DAIMON DAIN DAIS DAL DALE DALER DALETH DALI DALT DALTON DAM DAME DAMIE DAMIER DAMINE DAMN DAMNER DAMP DAMPEN DAMPER DAMSEL DAMSON DAN DANG DANGER DANGLE DANIO DANLI DAO DAOINE DAP DAR DARE DARG DARGUE DARI DARING DARN DARNEL DARST DART DARTLE DARTOS DARTS DAS DASH DASHER DASI DASNT DASTUR DATE DATER DATIL DATING DATION DATUM DAUB DAUBE DAUBER DAUNT DAUT DAUTIE DE DEAIR DEAL DEALT DEAN DEAR DEARTH DEASH DEASIL DEATH DEB DEBAR DEBIT DEBOSH DEBRIS DEBT DEBTOR DEBUS DEBUT DEG DEGAS DEGU DEGUM DEGUST DEHAIR DEHORN DEHORS DEHORT DEIGN DEINOS DEISM DEIST DELINT DELTA DEMAL DEMAST DEMI DEMIT DEMOB DEMON DEMOS DEN DENARO DENAT DENIAL DENIM DENT DENTAL DENTIL DEOTA DEPA DEPART DEPAS DEPOH DEPORT DEPOT DEPTH DERAH DERAIL DERAT DERM DERMA DERMAL DERMIS DERMOL DERN DEROUT DERUST DESALT DESI DESIGN DESMA DESMAN DESMON DESPOT DETAIL DETAIN DETAR DETIN DETOUR DETUR DEUL DEUTON DHA DHAI DHAN DHAURI DHERI DHOBI DHOLE DHONI DHOTI DHOUL DHU DI DIAL DIALER DIAMB DIAN DIAPER DIATOM DIB DIBASE DIBROM DIBS DIE DIEB DIEM DIER DIET DIETAL DIG DIGEST DIGHT DIGLOT DIGRAM DIGS DIHALO DILATE DILO DILUTE DIM DIMBER DIMBLE DIME DIMER DIMPLE DIMPS DIN DINAR DINE DINER DINERO DING DINGAR DINGE DINGLE DINGO DINGUS DINT DINUS DIOL DIOSE DIOTA DIP DIPLOE DIPOLE DIPTER DIRE DIRGE DIRHEM DIRL DIRT DIRTEN DIS DISARM DISBAR DISH DISHER DISMAL DISMAN DISME DISNA DISORB DISPEL DISTAL DIT DITA DITAL DITE DITER DITHER DITONE DIURNE DO DOAB DOABLE DOAT DOATER DOB DOBE DOBLA DOBRA DOE DOER DOES DOESNT DOEST DOG DOGAL DOGATE DOGE DOGIE DOGMA DOGMAN DOGS DOGTIE DOIGT DOINA DOING DOINGS DOIT DOLA DOLE DOLENT DOLI DOLIA DOLINA DOLINE DOLIUM DOLMAN DOLMEN DOLT DOM DOMAIN DOMAL DOMBA DOME DOMENT DOMER DOMINE DOMITE DOMN DOMNEI DOMPT DON DONATE DONE DONG DONGA DONSIE DONT DONUM DOP DOPA DOPE DOPER DOR DORAB DORIA DORM DORMIE DORN DORP DORSAL DORSEL DORSUM DORTS DOS DOSA DOSAGE DOSE DOSER DOT DOTAGE DOTAL DOTE DOTER DOTING DOTISH DOUAR DOUBLE DOUBT DOUGH DOUGHT DOUM DOUP DOUR DOUSE DOUSER DOUT DOUTER DRAB DRAG DRAGO DRAGON DRAIL DRAIN DRAINE DRAM DRANG DRANT DRAPE DRAT DRATE DREAM DREAMT DREG DREGS DRENG DREST DRIAS DRIB DRIEST DRIP DROGH DROGUE DROIT DROME DRONA DRONE DROP DROPT DRUB DRUG DRUITH DRUM DRUNG DRUPAL DRUPE DRUPEL DRUSE DUAL DUALI DUALIN DUB DUBASH DUBS DUE DUEL DUER DUET DUG DUGAL DUHAT DUIM DUIT DULER DULIA DULSE DULT DULTIE DUM DUMA DUMB DUMBA DUMOSE DUMP DUMPER DUMPLE DUN DUNAIR DUNAL DUNE DUNG DUNGER DUNGOL DUNITE DUNST DUNT DUNTLE DUO DUOLE DUP DUPE DUPER DUPION DUPLA DUPLE DUPLET DURA DURAIN DURAL DURANT DURE DURGAN DURIAN DURING DURN DURO DURST DUSH DUSIO DUST DUSTER DUTRA EA EAN EAR EARING EARL EARN EARTH EASING EAST EAT EATING EATS EBON EDH EDIT EDITAL EDITOR EGAD EGIPTO EGMA EGO EGOISM EGOIST EGOL EH EIGHT EL ELAIN ELAND ELAPID ELATOR ELB ELD ELDIN ELDING ELISOR ELM ELOD ELOIGN ELOPS ELS ELSIN ELT ELUTOR EM EMBAR EMBIND EMBIRA EMBOG EMBUIA EMBUS EMIR EMIT EMODIN EMPT EMPTOR EMU EN ENALID ENAM ENAMOR ENAPT ENARM END ENDURA ENGAOL ENGARB ENGAUD ENGILD ENGIRD ENGIRT ENGLAD ENGLUT ENGOLD ENGRAM ENHALO ENHAT ENIGMA ENLARD ENLIST ENMIST ENODAL ENOIL ENOL ENORM ENOUGH ENRAPT ENRIB ENROL ENRUT ENS ENSOUL ENSTAR ENTAD ENTAIL ENTAL ENTIA ENTOIL ENTOMB ENTRAP EOAN EOLITH EON EONISM EOSIN EPHA EPHOD EPHOR EPOS EPULIS EPULO EPURAL ER ERA ERAL ERBIA ERBIUM ERD ERG ERGAL ERGON ERGOT ERIA EROS ERS ERTH ERUDIT ERUPT ES ESHIN ESPIAL ESPINO ESTADO ESTAMP ESTOP ESTRIN ETA ETALON ETHAL ETHID ETHNAL ETHNOS ETHOS ETHROG ETNA ETUA ETUI EU EUPAD EUPHON EUSOL GA GAB GABI GABION GABLE GABLET GAD GADE GADUIN GAEN GAET GAIN GAINE GAINER GAINS GAINST GAIR GAIT GAITED GAITER GAL GALE GALEID GALET GALI GALIOT GALOP GALORE GALOSH GALP GALT GALUTH GAM GAMB GAMBET GAMBIT GAMBLE GAMBOL GAME GAMIN GAMONT GAMORI GAMP GAMUT GAN GANDER GANDUL GANDUM GANE GANOID GANSEL GANT GANTSL GAOL GAOLER GAP GAPE GAPER GAPES GAPO GAR GARB GARBEL GARBLE GARDEN GARE GAREH GARISH GARLE GARN GARNEL GARNET GARSE GARSIL GARTEN GARTH GARUM GAS GASH GASLIT GASP GASPER GAST GASTER GAT GATE GATED GATER GATHER GATOR GAU GAUB GAUD GAULIN GAULT GAUM GAUN GAUNT GAUP GAUR GAUS GAUT GE GEAL GEAN GEAR GEASON GEAT GEBUR GED GEIN GEIRA GEISHA GEISON GEL GELD GELID GELT GEM GEMOT GEMUL GEMUTI GEN GENA GENAL GENIAL GENIP GENIPA GENIUS GENOM GENOS GENRO GENS GENT GENU GENUA GENUAL GENUS GEO GEODAL GEOID GEOSID GER GERAH GERB GERBIL GERIM GERIP GERM GERMAL GERMAN GERMIN GERMON GERONT GERS GERSUM GERUND GESITH GEST GET GETA GETAH GETUP GEUM GHAIST GHAT GHOST GHOUL GIANT GIB GIBARO GIBE GIBEL GIBER GIBLEH GIBLET GIBUS GID GIE GIED GIEN GILD GILDEN GILDER GILO GILSE GILT GIM GIMBAL GIMBLE GIMEL GIMLET GIMP GIMPED GIMPER GIN GIO GIP GIPON GIPSER GIRBA GIRD GIRDLE GIRL GIRN GIRO GIRSE GIRSH GIRSLE GIRT GIRTH GISH GISLA GISLER GIST GIT GITH GLAD GLADE GLAIR GLAM GLAND GLANS GLAR GLARE GLAUM GLAUR GLEAM GLEAN GLEBA GLEN GLENT GLIA GLIB GLIDE GLIDER GLIME GLINT GLIOMA GLIOSA GLOAM GLOAT GLOBE GLOBED GLOBIN GLOEA GLOM GLOME GLOMUS GLOP GLOR GLORE GLOST GLOUT GLUB GLUE GLUED GLUER GLUISH GLUM GLUMA GLUME GLUMP GLUSID GLUT GLUTEN GLUTIN GNAR GNARL GNASH GNAT GNOME GNOMED GNU GO GOA GOAD GOAL GOALIE GOAT GOB GOBAN GOBI GOBLET GOBLIN GOD GODE GODET GODLET GOEL GOER GOES GOETIA GOI GOITER GOL GOLA GOLD GOLDEN GOLDER GOLDIE GOLDIN GOLEM GOLI GOLPE GOMARI GOMART GOMER GOMLAH GOMUTI GON GONAD GONAL GONE GONER GONIA GONIAL GONID GONIUM GOPHER GOPURA GOR GORA GORAL GORAN GORB GORBAL GORBET GORBLE GORE GORHEN GORLIN GORMED GORSE GOS GOSAIN GOSH GOSLET GOSPEL GOT GOTE GOTRA GOUMI GOUP GOURD GOURDE GOUT GRA GRAB GRABEN GRAD GRADE GRADIN GRADUS GRAIL GRAIN GRAIP GRAITH GRAM GRAME GRAMP GRAND GRANE GRANO GRANT GRAPE GRAPED GRAPH GRASP GRAT GRATE GRATIS GREAT GREIN GREUND GRID GRIDE GRILSE GRIM GRIME GRIMP GRIN GRIND GRIP GRIPE GRIS GRISON GRIST GRIT GRITH GRITS GROAN GROAT GROATS GROIN GROPE GROS GROSET GROT GROUND GROUP GROUSE GROUT GROUTS GRUB GRUBS GRUE GRUEL GRUINE GRUM GRUME GRUMP GRUMPH GRUN GRUNT GRUSH GUAIOL GUAN GUANO GUAO GUAR GUARD GUARDO GUD GUDAME GUDE GUE GUEMAL GUEST GUHR GUIB GUIBA GUIDE GUIDER GUIDON GUILD GUILE GUILT GUIMPE GUINEA GUISE GUISER GUITAR GUL GULA GULAE GULAR GULDEN GULE GULES GULOSE GULP GULPER GULPIN GUM GUMBO GUMP GUN GUNA GUNATE GUNDI GUNEBO GUNITE GUNL GUNSEL GUNTER GUP GUR GURDLE GURL GURNET GURT GUSH GUSHER GUSHET GUSLA GUSLE GUST GUSTO GUT HA HABILE HABIT HABU HAD HADBOT HADE HADING HAEM HAET HAG HAGDON HAGI HAGLET HAGLIN HAIL HAILER HAILSE HAIN HAINE HAIR HAIRDO HAIRE HAIRED HAIREN HAIRUP HALE HALEBI HALER HALIDE HALITE HALO HALOID HALS HALSE HALSEN HALT HALTER HAM HAMBLE HAME HAMEIL HAMEL HAMI HAMLET HAMOSE HAMOUS HAMPER HAMULE HAMUS HAN HAND HANDER HANDLE HANGE HANGER HANGIE HANGLE HANGUL HANSE HANSEL HANSOM HANT HANTLE HAO HAOLE HAORI HAP HAPTEN HAPU HARBI HARD HARDEN HARDIM HARE HAREM HARL HARLOT HARM HARMEL HARN HARP HART HARTIN HASLET HASP HASTE HASTEN HASTER HAT HATE HATER HATPIN HATRED HAU HAUL HAULD HAULER HAULM HAUNT HAUSE HAUSEN HE HEAD HEAL HEALD HEAP HEAPS HEAR HEARST HEART HEARTS HEAT HEGARI HEGIRA HEI HEIAU HEIR HELING HELIO HELIUM HELM HELOMA HELP HEM HEMAD HEMAL HEMIN HEMINA HEML HEMOID HEMOL HEMP HEN HENAD HENBIT HEND HENISM HENT HEP HEPAR HEPTAD HEPTAL HER HERALD HERB HERBAL HERD HERIOT HERL HERMA HERMIT HERN HERNIA HERO HEROID HEROIN HERON HERS HEST HET HETMAN HI HIA HIANT HIATE HIATUS HID HIDAGE HIDE HIDER HIE HIELD HIEMAL HIERON HIEROS HIGDON HILSA HILT HILUM HILUS HIM HIMP HIN HINAU HIND HINDER HING HINGE HINGER HINGLE HINT HINTER HIP HIPE HIPER HIRE HIRED HIRMOS HIRO HIRPLE HIRSE HIRSEL HIRSLE HIS HISN HIST HISTON HIT HO HOAR HOARD HOARSE HOAST HOB HOD HODMAN HOE HOER HOG HOGA HOGAN HOGNUT HOGPEN HOI HOIN HOISE HOIST HOIT HOLARD HOLD HOLDEN HOLDER HOLDUP HOLE HOLER HOLIA HOLING HOLISM HOLM HOLMIA HOLT HOMAGE HOME HOMER HOMRAI HONDA HONE HONEST HONG HONIED HOP HOPE HOPED HOPER HOPI HORA HORAL HORDE HORME HORN HORNED HORNET HORSE HORST HOSE HOSED HOSEL HOSIER HOST HOSTEL HOSTER HOSTIE HOT HOTBED HOTEL HOTI HOUND HOUR HOURI HOUSAL HOUSE HOUSEL HOUSER HUB HUD HUE HUED HUER HUG HUGE HUIA HULA HUM HUMAN HUMANE HUMATE HUMBLE HUMBO HUMERI HUMET HUMID HUMIN HUMITE HUMLIE HUMOR HUMP HUMPED HUNDI HUNG HUNGER HUNT HUP HURA HURDIS HURDLE HURDS HURE HURL HURLED HURON HURST HURT HURTED HURTLE HUSE HUSO HUSPIL HUSTLE HUT HUTIA IAMB IAMBUS IAO IBA IBOTA ID IDANT IDE IDEA IDEAL IDES IDGAH IDLE IDLER IDOL IDOLA IDOLUM IDOSE IE IGNORE IGNOTE IHRAM ILEON ILEUM ILEUS ILOT IMAGE IMAGER IMAGO IMARET IMBAN IMBAND IMBARN IMBAT IMBE IMBED IMBER IMBRUE IMBUE IMP IMPALE IMPANE IMPAR IMPARL IMPART IMPEL IMPEN IMPEND IMPENT IMPEST IMPONE IMPORT IMPOSE IMPOST IMPOT IMPREG IMPUGN IMPURE IMPUTE IMU IN INAPT INARM INBE INBRED INDART INDE INDEBT INDOLE INDUE INDULT INEPT INERM INERT ING INGATE INGEST INGLE INGOT INHALE INHAUL INHUME INLAUT INLET INMATE INMOST INOMA INORB INPORT INPOUR INPUSH INPUT INRO INROAD INRUB INRUSH INSEA INSEAM INSERT INSET INSHOE INSOLE INSORB INSOUL INSTAR INSTEP INSULA INSULT INSURE INTER INTO INTOED INTUBE INTUE INULA INURE INURED IO IODATE ION IOTA IPOMEA IRADE IRATE IRE IRON IRONE IS ISAGON ISBA ISLAND ISLE ISLET ISLOT ISM ISMAL ISO ISOBAR ISOGEN ISOHEL ISOMER ISOPAG IST ISTLE ISURET IT ITEM ITER ITHER ITMO ITS LA LAB LABIS LABIUM LABOR LABOUR LABRET LABRUM LAD LADE LADEN LADER LADIES LADING LAET LAETI LAG LAGEN LAGEND LAGER LAI LAID LAIGH LAIN LAINE LAIOSE LAIR LAIRD LAM LAMB LAMBER LAMBIE LAME LAMEDH LAMENT LAMIN LAMISH LAMNID LAMP LAMPER LAN LAND LANDER LANE LANGI LANGUR LANOSE LANSEH LANT LANTUM LANUGO LANUM LAP LAPON LAPSE LAPSED LAPSER LAPSI LAR LARD LARDON LARGE LARGEN LARGO LARI LARID LARIGO LARIN LARINE LAROID LAS LASER LASH LASHER LAST LASTER LASTRE LAT LATE LATED LATEN LATER LATH LATHE LATHEN LATHER LATIGO LATION LATISH LATRO LATRON LATUS LAUD LAUDER LAUGH LAUN LAUND LAUR LAURIN LEA LEAD LEADIN LEAM LEAN LEANT LEAP LEAPT LEAR LEARN LEARNT LEASH LEAST LEAT LEATH LEBAN LED LEG LEGATO LEGION LEGIST LEGIT LEGMAN LEGOA LEGUA LEGUAN LEHR LEHUA LEI LEMAN LEMNAD LEMON LEMUR LENAD LENARD LEND LENGTH LENIS LENO LENS LENT LENTH LENTO LENTOR LEPA LEPRA LEPTID LEPTON LEPTUS LEROT LERP LESION LEST LET LETUP LEU LEUD LEUMA LI LIANG LIAR LIARD LIBANT LIBATE LIBER LIBRA LID LIDO LIE LIED LIEN LIENOR LIER LIESH LIEU LIGAS LIGATE LIGHT LIGNE LIGNUM LIGURE LIM LIMAN LIMB LIMBAT LIMBED LIMBER LIMBO LIMBUS LIME LIMEN LIMER LIMES LIMN LIMNER LIMO LIMOSE LIMOUS LIMP LIMPER LIMPET LIMU LIN LINA LINAGE LINDER LINDO LINE LINEA LINEAR LINED LINER LING LINGA LINGE LINGER LINGO LINGUA LINHA LINO LINOUS LINT LINTER LION LIONET LIP LIPA LIPASE LIPOMA LIRA LIRATE LIRE LIS LISH LISP LISPER LIST LISTED LISTEN LISTER LIT LITAS LITE LITER LITH LITHE LITHO LITMUS LITRA LITUS LO LOA LOAD LOADEN LOADER LOAM LOAN LOANER LOATH LOATHE LOB LOBAR LOBATE LOBE LOBED LOBING LOD LODE LODGE LODGER LOG LOGE LOGEUM LOGIA LOGIE LOGIN LOGIUM LOGMAN LOHAN LOIN LOINED LOIR LOITER LOMA LOMENT LOMITA LONE LONG LONGA LONGE LONGER LONGS LONGUE LONTAR LOP LOPE LOPER LORA LORAN LORATE LORD LORE LORED LORI LORIS LORN LORS LORUM LOSE LOSER LOSH LOSING LOST LOT LOTA LOTASE LOTE LOTS LOTUS LOUD LOUDEN LOUGH LOUNGE LOUP LOUPE LOUR LOUSE LOUT LOUTER LUBE LUBRA LUDO LUE LUES LUG LUGE LUGER LUM LUMBAR LUMBER LUMEN LUMINE LUMP LUMPER LUMPET LUNA LUNAR LUNARE LUNATE LUNE LUNES LUNG LUNGE LUNGED LUNGER LUNGI LUNGIE LUNGIS LUNOID LUNT LUPE LUPINE LUPIS LUPOID LURA LURDAN LURE LURG LURID LUSH LUSHER LUST LUSTER LUSTRA LUT LUTE LUTEIN LUTEO LUTER LUTING LUTOSE LUTRIN MA MABI MAD MADE MADNEP MADO MADURO MAE MAG MAGE MAGI MAGNES MAGNET MAGOT MAGPIE MAHOE MAHOLI MAHONE MAHOUT MAID MAIDEN MAIGRE MAIL MAILED MAILER MAIN MAINS MAINT MAIRE MAL MALE MALEO MALI MALIGN MALINE MALIST MALO MALT MALTER MAN MANBOT MAND MANDIL MANE MANED MANEI MANES MANG MANGE MANGEL MANGER MANGI MANGLE MANGO MANGUE MANI MANID MANIST MANITO MANIU MANLET MANO MANOR MANRED MANSE MANSO MANT MANTEL MANTER MANTES MANTID MANTIS MANTLE MANTO MANUL MANURE MANUS MAO MAP MAPLE MAPO MAR MARBLE MARE MARGE MARGIN MARID MARINE MARIS MARISH MARL MARLED MARLI MARLIN MARO MARSH MART MARTEL MARTEN MARTIN MARU MAS MASDEU MASH MASHER MASHIE MASHRU MASLIN MASON MAST MASTED MASTER MASU MAT MATE MATER MATH MATHES MATIN MATING MATINS MATIPO MATRIS MATRON MATSU MATURE MAU MAUD MAUDLE MAUGER MAUGH MAUL MAULER MAUN MAUND MAUNGE MBORI ME MEAD MEAL MEAN MEANT MEAT MEATUS MEDAL MEDIA MEDIAL MEDIAN MEDINO MEDIO MEDIUS MEDLAR MEGILP MEHARI MEHTAR MEIN MEIO MEITH MEL MELA MELANO MELD MELOID MELON MELOS MELOSA MELT MELTON MEN MENALD MEND MENDS MENG MENHIR MENIAL MENSA MENSAL MENTAL MENTOR MENU MERGH MERIAH MERIL MERIST MERIT MERL MERLIN MERLON MERO MEROP MEROS MESA MESAD MESAIL MESAL MESH MESIAD MESIAL MESIAN MESION MESO MESON MESPIL MET META METAD METAL METHID METHOD METIS METRA METRIA MHO MI MIAN MIAS MIAUL MIB MID MIDE MIDGE MIDGET MIDLEG MIDS MIDST MIDTAP MIEN MIG MIGHT MIHRAB MIL MILA MILD MILDEN MILDER MILE MILER MILHA MILNER MILO MILORD MILPA MILT MILTER MIN MINA MINAR MIND MINDER MINE MINER MINES MING MINGE MINGLE MINHAG MINO MINOR MINOT MINT MINTER MINUET MINUS MINUTE MIR MIRAGE MIRATE MIRD MIRE MIRO MIRTH MISDO MISE MISER MISGO MISHAP MISLED MISPUT MIST MISTED MISTER MISTLE MISURA MITE MITER MITRA MITRAL MITRE MO MOAN MOAT MOB MOBED MOBILE MOBLE MODAL MODE MODEL MODENA MODERN MODEST MODISH MODIST MODIUS MODULE MOG MOHA MOHAIR MOHAR MOHEL MOHR MOHUR MOIDER MOIL MOILER MOILES MOIRE MOISE MOIST MOIT MOLA MOLAR MOLD MOLDER MOLE MOLER MOLEST MOLINE MOLPE MOLT MOLTEN MOLTER MON MONA MONAD MONAL MONAS MONASE MONE MONEL MONER MONG MONGER MONGST MONIAL MONIST MONTE MONTH MOP MOPANE MOPE MOPER MOPH MOPING MOPISH MOPLA MOPUS MOR MORA MORAL MORALE MORALS MORAT MORATE MORBID MORE MOREL MORES MORG MORGA MORGAN MORGEN MORGUE MORIN MORN MORNE MORNED MORPH MORSAL MORSE MORSEL MORT MORTAL MORTH MORULA MORULE MOST MOSTE MOT MOTE MOTED MOTEL MOTER MOTH MOTHED MOTHER MOTILE MOU MOUD MOUDIE MOUL MOULD MOULE MOULIN MOULS MOUND MOUNT MOUP MOURN MOUSE MOUSER MOUSLE MOUT MOUTAN MOUTH MPRET MU MUANG MUD MUDAR MUDIR MUDRA MUG MUGA MUID MUIR MUIST MULDER MULE MULETA MULGA MULIER MULISH MULITA MULSE MULT MUN MUND MUNDIL MUNDLE MUNG MUNGA MUNGE MUNGO MUNSHI MUNT MURA MURAGE MURAL MURE MURGA MURID MURINE MURLIN MUSAL MUSANG MUSAR MUSE MUSED MUSER MUSH MUSHA MUSHED MUSHER MUSHLA MUSIE MUSING MUSLIN MUSROL MUST MUSTER MUTA MUTAGE MUTASE MUTE MUTH NA NAB NABLE NABS NADIR NAE NAEL NAG NAGHT NAGOR NAID NAIG NAIL NAILER NAIO NAIS NAISH NAM NAME NAMER NAOS NAP NAPE NAPU NAR NARD NARES NARGIL NASH NASI NASROL NAST NASUTE NAT NATES NATHE NATHER NATR NATURE NAUGER NAUGHT NAUT NE NEA NEAL NEAP NEAR NEAT NEATH NEB NEBRIS NEBULA NEGRO NEGUS NEI NEIGH NEIST NEMA NEO NEP NESH NEST NET NETH NETI NETOP NEUMA NEURAD NEURAL NGAI NGAIO NGAPI NI NIB NIBS NID NIDAL NIDE NIDGE NIDGET NIDOR NIDUS NIEPA NIG NIGH NIGHT NIGHTS NIGRE NIGUA NIL NIM NIMB NIMBED NIMBLE NIMBUS NIOG NIOTA NIP NIPA NIPTER NIRLES NIT NITER NITHER NITO NITRO NO NOA NOB NOBLE NOBS NOD NODAL NODE NODI NODULE NODUS NOEL NOG NOGAL NOIL NOILER NOIR NOISE NOMA NOMAD NOME NOMIAL NOPAL NOPE NOR NORATE NORI NORIA NORIE NORITE NORM NORMA NORMAL NORSEL NORTH NOSE NOSED NOSER NOSH NOT NOTAL NOTE NOTED NOTER NOTHER NOTUM NOUGAT NOUGHT NOUP NOUS NTH NU NUB NUBIA NUBILE NUDATE NUDE NUDGE NUDGER NUDISH NUDISM NUDIST NUL NUMB NUMBER NUMBLE NUMDA NUMDAH NUMERO NURHAG NURSE NURSLE NUT NUTMEG NUTRIA OAM OAR OARED OARIUM OAST OAT OATBIN OATEN OATH OATHED OBAN OBE OBEAH OBEISM OBELIA OBELUS OBI OBIT OBLATE OBLIGE OBTAIN OBTUND OBTUSE OD ODA ODAL ODE ODEL ODEUM ODIST ODIUM ODUM OE OER OES OGAIRE OGAM OGHAM OGLE OGLER OGRE OGRISH OGRISM OGUM OH OHIA OHM OHMAGE OIL OILED OILER OILMAN OIME OINT OLAM OLD OLDEN OLDER OLDIE OLDISH OLEIN OLENA OLENID OLENT OLIBAN OLID OLM OLPE OM OMBER OMEGA OMEN OMER OMINA OMIT OMLAH OMNIST ON ONA ONAGER ONE ONEISM ONER ONIUM ONRUSH ONS ONSET ONSIDE ONTAL ONUS OPAH OPAL OPALED OPE OPEN OPERA OPHITE OPIATE OPINE OPINER OPIUM OPT OPTIME OPUS OR ORA ORAD ORAGE ORAL ORANG ORANGE ORANT ORATE ORB ORBED ORBIT ORBITE ORBLET ORDAIN ORDEAL ORDU ORE OREAD OREMAN ORENDA ORGAN ORGASM ORGEAT ORGIA ORGUE ORIEL ORIENT ORIGAN ORLE ORLEAN ORLET ORNA ORNATE ORNIS ORPHAN ORPINE ORSEL ORT ORTHAL ORTHID ORTIGA OS OSAMIN OSE OSELA OSIDE OSIER OSMATE OSMIN OSMINA OSMUND OSTEAL OSTEIN OSTIAL OSTIUM OTHER OTURIA OUABE OUGH OUGHT OULAP OUNDS OUPHE OUR OURIE OURS OUST OUSTER OUT OUTAGE OUTBAN OUTBAR OUTBEG OUTBID OUTED OUTEN OUTER OUTGAS OUTHER OUTING OUTISH OUTLER OUTLIE OUTLIP OUTMAN OUTRAP OUTRE OUTRIG OUTSEA OUTSIN PA PABLO PAD PADGE PADLE PADRE PAEON PAGE PAGER PAGRUS PAGUS PAH PAHI PAHMI PAHO PAIGLE PAIL PAILOU PAIN PAINED PAINT PAIR PAIRED PAIS PAL PALE PALED PALER PALET PALI PALING PALISH PALM PALMED PALMER PALMO PALMUS PALT PALTER PALUS PAM PAMENT PAN PAND PANDER PANDLE PANE PANED PANEL PANG PANGI PANMUG PANSE PANT PANTER PANTIE PANTLE PANTO PANTOD PANTS PAON PAR PARD PARDO PARDON PARE PAREL PAREN PARENT PARGE PARGET PARGO PARI PARIES PARINE PARING PARISH PARLE PARNEL PARODE PAROL PAROLE PAROLI PAROUS PARSE PARSON PART PARTED PARTO PASH PASHM PASI PASMO PAST PASTE PASTED PASTEL PASTER PASTIL PASTOR PASUL PAT PATE PATEL PATEN PATER PATESI PATH PATHED PATHOS PATINE PATIO PATO PATOIS PATRIN PATROL PATRON PATU PAU PAULIE PAULIN PAUSE PAUSER PAUT PEA PEAG PEAI PEAL PEAN PEANUT PEAR PEARL PEART PEASON PEAT PEBA PED PEDA PEDAL PEDANT PEDION PEDLAR PEDRO PEDUM PEG PEGA PEGMAN PEHO PELIOM PELON PELOTA PELT PELTA PELU PELUDO PEN PENAL PEND PENDA PENDOM PENGO PENIAL PENIS PENSUM PENT PENTA PENTAD PENTOL PENULT PEON PER PERDU PERI PERIL PERIOD PERISH PERIT PERLID PERM PERMIT PERN PEROBA PERSON PERT PERULA PES PESA PESO PEST PET PETAL PETARD PETO PETROL PEUHL PHAGE PHANO PHARE PHAROS PHASE PHASM PHEAL PHENOL PHEON PHI PHIAL PHIALE PHIT PHLEGM PHLOEM PHO PHOLAD PHON PHONAL PHONE PHORIA PHORID PHOS PHOSE PHOT PHOTAL PHRASE PHU PHUT PI PIA PIAL PIAN PIANO PIDAN PIE PIED PIELUM PIEMAG PIEMAN PIEN PIEND PIER PIET PIETAS PIG PIGDAN PIGDOM PIGEON PIGLET PIGMAN PIGNUS PIGNUT PILAGE PILAR PILAU PILE PILED PILER PILES PILEUS PILGER PILM PILON PILOSE PILOT PILOUS PILUM PILUS PIMOLA PIN PINA PIND PINDA PINDER PINE PINEAL PINED PINER PING PINGLE PINGUE PINO PINOLE PINT PINTA PINTE PINTLE PINTO PIOTED PIOUS PIR PIRATE PIRL PIRN PIROL PISANG PISE PISH PISHU PISO PIST PISTLE PISTOL PISTON PIT PITA PITAU PITH PITHOS PITMAN PLAGE PLAGUE PLAID PLAIN PLAINT PLAIT PLAN PLANE PLANER PLANET PLANG PLANT PLASH PLASM PLAT PLATE PLATED PLATEN PLATER PLAUD PLEA PLEAD PLEAT PLEB PLEBS PLED PLEION PLENUM PLEON PLEURA PLIANT PLIED PLIER PLIERS PLIES PLIGHT PLIM PLINTH PLOAT PLOD PLODGE PLOMB PLOT PLOTE PLOUGH PLOUT PLUD PLUG PLUM PLUMA PLUMB PLUME PLUMED PLUMER PLUMET PLUNGE PLUS PLUSH PNEUMA PO POB POBS POD PODAL PODGE PODGER PODIAL PODITE PODIUM PODLER POE POEM POET POH POHA POHNA POI POIL POILU POIND POINT POISE POISED POISER POL POLAR POLDER POLE POLER POLIAD POLIS POLISH POLITE POLT POM POMADE POMANE POMATE POMBE POME PON POND PONDER PONDUS PONE PONG PONGA PONIER PONT PONTAL PONTES PONTIL PORAL PORE PORED PORGE PORING PORISM PORITE PORT PORTA PORTAL PORTED PORTIA PORULE PORUS POSE POSER POSEUR POSH POSING POSIT POSNET POST POSTAL POSTED POSTER POSTIL POT POTAGE POTASH POTDAR POTE POTER POTGUN POTHER POTLEG POTLID POTMAN POULT POUND POUR POURIE POUSER POUT POUTER PRABHU PRAD PRAISE PRAM PRASE PRAT PRATE PRAU PREBID PRELIM PREST PRESTO PRETAN PRIDE PRIED PRIEST PRIG PRIM PRIMA PRIMAL PRIME PRIMUS PRINE PRINT PRION PRISAL PRISM PRISON PRIUS PRO PROA PROAL PROB PROBAL PROBE PROD PROEM PROG PROGNE PROLAN PROLEG PRONE PRONG PROSE PROTE PROTEA PRUDE PRUH PRUNE PRUNT PRUT PRUTAH PSALM PSEUDO PSHA PSI PSORA PST PTISAN PU PUA PUAN PUB PUBAL PUBES PUBIAN PUBIS PUD PUDENT PUDGE PUEBLO PUG PUGH PUGIL PUGMAN PUISNE PUIST PUL PULE PULER PULI PULING PULISH PULSE PULTON PUMA PUN PUNA PUNDIT PUNG PUNGA PUNGAR PUNGER PUNGI PUNGLE PUNISH PUNLET PUNT PUNTA PUNTAL PUNTEL PUNTER PUNTI PUNTIL PUNTO PUR PURDAH PURE PURED PURGA PURGE PURINE PURISM PURIST PURL PURLIN PURSE PURSED PUS PUSH PUSHER PUT PUTAGE PUTEAL PUTHER PUTID PUTLOG PUTOIS PUTRID RA RAB RABID RABIES RAD RADIO RADISH RADIUM RADIUS RADOME RADON RAG RAGE RAGLET RAGLIN RAGOUT RAGULE RAH RAID RAIL RAIN RAIS RAISE RAISED RALE RALPH RAM RAMBEH RAMBLE RAME RAMED RAMENT RAMET RAMI RAMIE RAMOSE RAMOUS RAMP RAMPED RAMSON RAMTIL RAMULE RAMUS RAN RAND RANDEM RANDLE RANDOM RANE RANG RANGE RANGED RANGLE RANI RANID RANSEL RANSOM RANT RAP RAPE RAPHE RAPHIS RAPID RAPINE RAPING RAPIST RAPT RAPTUS RAS RASE RASEN RASH RASION RASP RASPED RASTLE RAT RATE RATED RATEL RATH RATHE RATHED RATINE RATING RATIO RATION RAUGHT RAULI RAUN RAUNGE RAUPO RE REA READ REAGIN REAL REALM REAM REAP REASON REATUS REB REBAG REBAIT REBAN REBATO REBIA REBIAS REBID REBIND REBLOT REBOIL REBOLD REBOLT REBOP REBUD REBUS REBUSH REBUT RED REDAN REDAUB REDIA REDIG REDIP REDO REDTAB REDTOP REDUB REG REGAIN REGAL REGIA REGILD REGIN REGION REGMA REGNAL REGULA REGULI REGUSH REH REHANG REHAUL REHUNG REIGN REIM REIN REINA REINS REIS REIT REL RELAIS RELAMP RELAND RELAP RELAST RELBUN RELISH RELIST RELOAD RELOAN RELOST RELOT REMAIL REMAIN REMAN REMAND REMAP REMAST REMIND REMINT REMIT REMOLD REMOP RENAIL RENAL REND RENISH RENT RENTAL REOIL REOMIT REP REPAND REPAST REPIN REPLAN REPLOD REPLOT REPLUM REPOST REPOT REPS REPUGN RESAIL RESALT RESH RESHIP RESHUN RESHUT RESIGH RESIGN RESIN RESINA RESING RESLOT RESNAP RESNUB RESOAP RESOIL RESP RESPAN RESPIN RESPOT REST RESUIT RESULT RESUN RESUP RET RETAG RETAIL RETAIN RETAN RETIA RETIAL RETIN RETINA RETIP RETOLD RETOMB RHAGON RHAMN RHASON RHE RHEA RHEIN RHEMA RHEUM RHINAL RHINE RHINO RHO RHOMB RHUMB RHUMBA RIA RIAL RIANT RIB RIBALD RIBAND RIBAT RIBE RIBLET RIBOSE RID RIDE RIDEAU RIDEN RIDENT RIDGE RIDGEL RIE RIEM RIG RIGHT RIGHTO RIGNUM RIGOL RILE RIM RIMA RIMAL RIMATE RIME RIMOSE RIMOUS RIMPLE RIMU RIMULA RIND RINDLE RINE RING RINGE RINGED RINGLE RINSE RIO RIOT RIP RIPA RIPAL RIPE RIPEN RIPGUT RIPOST RISE RISEN RISP RIST RIT RITA RITE RITUAL ROAD ROAM ROAN ROAST ROB ROBAND ROBE ROBIN ROBING ROBLE ROBUST ROD RODE RODENT RODGE RODHAM RODING RODLET RODMAN ROE ROED ROG ROGAN ROGUE ROHAN ROHUN ROHUNA ROI ROID ROIL ROIT ROLE ROMAL ROMP ROMPU ROND RONDE RONDEL RONDLE RONE ROPE ROPES ROPING ROPISH ROSAL ROSE ROSEAL ROSED ROSEL ROSET ROSIED ROSIN ROSTEL ROT ROTA ROTAL ROTAN ROTANG ROTE ROTGE ROTULA ROTUND ROUB ROUD ROUE ROUGE ROUGH ROUN ROUND ROUP ROUPET ROUPIT ROUSE ROUST ROUT ROUTE ROUTH RUB RUBATO RUBIED RUBINE RUBLE RUBLIS RUD RUDAS RUDE RUDGE RUDISH RUE RUEN RUG RUGA RUGATE RUGOSA RUGOSE RUIN RUINED RUING RULE RULING RUM RUMAL RUMBLE RUMBO RUMEN RUMP RUMPAD RUMPLE RUN RUNDLE RUNE RUNED RUNG RUNITE RUNLET RUNT RUNTED RUPA RUPIA RUPIAH RUPIAL RUPIE RUSE RUSH RUSHED RUSHEN RUSINE RUSMA RUSOT RUST RUSTLE RUT RUTH RUTILE RUTIN SA SAB SABE SABER SABINE SABINO SABLE SABOT SAD SADE SADH SADHE SADHU SADO SADR SAG SAGE SAGO SAGOIN SAGUM SAH SAHIB SAHME SAI SAID SAIL SAILED SAILER SAILOR SAIM SAIN SAINT SAIP SAIR SAITHE SAL SALE SALEP SALINE SALITE SALMON SALON SALP SALT SALTED SALTEN SALTER SALUNG SALUTE SAM SAMBO SAME SAMEL SAMEN SAMH SAMIEL SAMITE SAMLET SAMP SAMPI SAMPLE SAN SAND SANDER SANDHI SANE SANG SANGEI SANGER SANT SANTIR SAO SAP SAPHIE SAPID SAPIN SAPLE SAPO SAPOR SAPOTE SAR SARD SARDEL SARE SARGO SARI SARIP SAROD SARON SARONG SARPO SART SAT SATE SATIN SATINE SATIRE SATRON SAUGER SAUGH SAULD SAULIE SAULT SAUM SAUMON SAUR SAUREL SAUT SAUTE SDEATH SE SEA SEADOG SEAH SEAL SEAM SEAR SEAT SEBAIT SEBUM SEDAN SEDUM SEG SEGO SEGOL SEIT SELAH SELDOM SELDOR SELION SELT SEMI SEMITA SEMOLA SEN SENAM SEND SENDAL SENIOR SENT SEPAD SEPAL SEPIA SEPIAN SEPION SEPIUM SEPT SEPTA SEPTAL SEPTAN SEPTUM SER SERA SERAB SERAI SERAIL SERAL SERANG SERAPH SERAU SERDAB SERIAL SERIN SERIO SERMO SERMON SERO SERON SERT SERTA SERTUM SERUM SERUT SET SETA SETAL SETH SETON SETULA SETUP SEUGH SH SHA SHAB SHAD SHADE SHADER SHAG SHALE SHALOM SHALT SHAM SHAME SHAMED SHAMER SHAMIR SHAN SHANT SHAP SHAPE SHAPED SHAPEN SHAPER SHARD SHARE SHARN SHARP SHAT SHAUL SHAUP SHAURI SHE SHEA SHEAL SHEAR SHEARD SHEAT SHED SHELA SHELD SHELTA SHEND SHENG SHER SHI SHIBAR SHIDE SHIED SHIEL SHIELD SHIER SHIM SHIMAL SHIN SHINE SHINER SHIP SHIRE SHIRL SHIRT SHITA SHO SHOAD SHOAL SHOAT SHOD SHODE SHODER SHOE SHOER SHOG SHOGI SHOGUN SHOLA SHOLE SHONE SHOP SHOR SHORAN SHORE SHORED SHORN SHORT SHOT SHOTE SHOU SHOULD SHOUT SHRAB SHRAG SHRAM SHRAP SHRED SHREND SHRIMP SHRINE SHRIP SHRITE SHROG SHROUD SHRUB SHRUG SHUBA SHUG SHUL SHULER SHUN SHUNE SHUNT SHURE SHUT SI SIAL SIB SIDE SIDER SIDHE SIDLE SIDLER SIDTH SIE SIER SIG SIGH SIGHER SIGHT SIGLA SIGMA SIGN SIGNAL SIGNER SIGNET SIGNUM SIL SILAGE SILANE SILE SILEN SILENT SILO SILT SIMA SIMAL SIMAR SIME SIMNEL SIMP SIMPER SIMPLE SIN SINA SINAL SIND SINDER SINDLE SINE SING SINGE SINGED SINGER SINGH SINGLE SINH SINTER SIOL SION SIP SIPAGE SIPE SIPER SIPHON SIR SIRE SIREN SIRPEA SIRPLE SIRUP SIT SITAO SITAR SITE SITH SITHE SITUAL SITULA SLA SLAB SLAD SLADE SLAE SLAG SLAIN SLAIT SLAM SLAMP SLANE SLANG SLANT SLAP SLAPE SLARE SLART SLARTH SLAT SLATE SLATER SLATH SLAUM SLED SLEIGH SLENT SLEPT SLEUTH SLID SLIDE SLIDER SLIGHT SLIM SLIME SLIMER SLINE SLING SLINGE SLIP SLIPE SLIRT SLIT SLITE SLOAN SLOB SLOD SLODGE SLOE SLOG SLOGAN SLON SLONE SLOP SLOPE SLOPED SLOPER SLORP SLOT SLOTE SLOTED SLOTH SLOUGH SLOUR SLUB SLUD SLUDGE SLUE SLUER SLUG SLUIG SLUIT SLUM SLUMP SLUNG SLUNGE SLUR SLURP SLUT SMA SMALT SMART SMEAR SMELT SMETH SMIDGE SMILE SMILER SMILET SMIT SMITE SMITER SMITH SMOG SMOLT SMORE SMOTE SMOUT SMUDGE SMUG SMUR SMUT SNAB SNAG SNAIL SNAITH SNAP SNAPE SNAPER SNARE SNARL SNATH SNATHE SNEAD SNEAP SNEATH SNEB SNED SNERP SNIB SNIBEL SNIDE SNIG SNIP SNIPE SNIPER SNIRL SNIRT SNITE SNITHE SNOB SNOD SNOG SNOGA SNOP SNORE SNORT SNOT SNOUT SNUB SNUDGE SNUG SNUM SNUP SNUR SNURL SNURP SNURT SO SOAM SOAP SOAPER SOAR SOB SOBEIT SOBER SOD SODA SODIUM SOE SOG SOGER SOGET SOH SOIL SOILED SOL SOLA SOLAN SOLAR SOLATE SOLD SOLDAN SOLDER SOLDI SOLE SOLEA SOLEMN SOLEN SOLENT SOLER SOLI SOLID SOLUM SOLUTE SOMA SOMAL SOMBER SOMBRE SOME SOMITE SOMPNE SON SONAR SOND SONERI SONG SONGLE SONTAG SOP SOPE SOPH SOPHIA SOPITE SORA SORAGE SORAL SORB SORBIN SORDA SORE SOREMA SORI SORITE SORN SORT SORTAL SORTED SORTIE SOT SOTIE SOTNIA SOU SOUARI SOUD SOUGH SOUGHT SOUL SOULED SOUM SOUND SOUP SOUPER SOUPLE SOUR SOURED SOUREN SOUTER SOUTH SPA SPAD SPADE SPADER SPAE SPAER SPAHI SPAID SPALD SPALE SPALT SPAM SPAN SPANE SPANG SPAR SPARE SPARGE SPARID SPARM SPART SPARTH SPAT SPATE SPATHE SPEAL SPEAN SPEAR SPED SPELT SPEND SPENT SPERM SPERMA SPET SPIDER SPIED SPIEL SPIER SPIG SPIGOT SPILE SPILER SPILT SPILTH SPIN SPINA SPINAE SPINAL SPINE SPINED SPINEL SPINET SPIRAL SPIRAN SPIRE SPIREA SPIRED SPIRO SPIRT SPIT SPITAL SPITE SPLAT SPLET SPLINE SPLINT SPLIT SPLORE SPLURT SPODE SPOGEL SPOIL SPOILT SPOLE SPOLIA SPONG SPONGE SPOR SPORAL SPORE SPORED SPORID SPORT SPOT SPOUT SPRAD SPRAG SPRAIN SPRANG SPRAT SPREAD SPRENG SPRENT SPRET SPRIED SPRIG SPRING SPRINT SPRIT SPRITE SPROAT SPROD SPROIL SPRONG SPROUT SPRUE SPRUG SPRUIT SPRUNG SPRUNT SPUD SPUG SPUME SPUN SPUNG SPUR SPURGE SPURL SPURN SPURT SPUT SPUTA SRI SRUTI ST STAB STABLE STADE STAG STAGE STAGED STAGER STAID STAIN STAIO STAIR STALE STAM STAMEN STAMIN STAMP STAND STANE STANG STAP STAPLE STAR STARE STARN STAUN STAUP STEAD STEAL STEAM STEAN STEG STEID STEIGH STEIN STELA STELAI STELAR STEM STEMA STEN STENAR STEND STENG STENO STENOG STEP STERI STERIN STERN STERNA STERO STEROL STIB STID STIGMA STIGME STILE STIM STIME STINE STING STINGE STINGO STION STIPE STIPED STIPEL STIR STIRP STOA STOB STOD STODGE STOEP STOG STOGA STOGIE STOLA STOLAE STOLE STOLED STOLEN STOLID STOMA STOMP STOND STONE STONED STONER STONG STOP STOPA STOPE STOPER STORE STORGE STORM STOUN STOUND STOUP STOUR STRA STRAD STRADE STRADL STRAE STRAG STRAIN STRAM STRAMP STRAND STRANG STRAP STRE STREAM STRENG STRIA STRIAE STRIAL STRID STRIDE STRIG STRIGA STRIND STRING STRIP STRIPE STROAM STRODE STROIL STROLD STROM STROMA STROMB STROME STRONE STRONG STROP STROUD STROUP STRUB STRUE STRUM STRUMA STRUNG STUB STUBER STUD STUDE STUDIA STUDIO STUE STUG STULM STUM STUMER STUMP STUN STUNG STUPA STUPE STUPID STUPOR SUABLE SUADE SUANT SUB SUBAGE SUBAH SUBAID SUBDIE SUBER SUBGET SUBGIT SUBGOD SUBLET SUBLID SUBLOT SUBMAN SUBMIT SUBORN SUBTLE SUD SUDATE SUE SUER SUET SUGAMO SUGAN SUGAR SUGENT SUGH SUGI SUID SUINE SUING SUINT SUIT SUITE SUITOR SULD SULEA SULPHA SULPHO SULTAM SULTAN SUM SUMNER SUMP SUMPER SUMPH SUMPIT SUMPLE SUN SUNDAE SUNDER SUNDOG SUNDRA SUNDRI SUNE SUNG SUNGHA SUNGLO SUNLET SUNLIT SUNT SUP SUPA SUPARI SUPE SUPER SUPERB SUPINE SUR SURA SURAH SURAHI SURAL SURAT SURBED SURD SURE SURGE SURIGA SURMA SURNAP SUTHER SUTILE SUTLER SUTOR SUTRA TA TAB TABES TABID TABLE TABLED TABLER TABLES TABOG TABOR TABOUR TABU TABULE TAD TADE TAE TAEL TAEN TAG TAHIL TAHIN TAHR TAHSIL TAI TAIGLE TAIL TAILED TAILER TAILGE TAILOR TAIMEN TAIN TAIPO TAIRGE TAIRN TAISE TAL TALD TALE TALED TALER TALES TALI TALION TALIS TALON TALOSE TALPID TALUS TAM TAMBER TAMBO TAMBOR TAME TAMEIN TAMER TAMIS TAMISE TAMP TAMPER TAMPIN TAMPON TAN TANBUR TANDEM TANDLE TANE TANG TANGED TANGER TANGI TANGIE TANGLE TANGO TANGS TANGUE TANGUM TANH TANIER TAO TAP TAPE TAPEN TAPER TAPIR TAPIS TAPISM TAPOUN TAPS TAPU TAPUL TAR TARDLE TARE TARGE TARI TARIE TARIN TARISH TARN TARO TARP TARPON TARPUM TARS TARSE TARSI TASH TASHIE TASU TAU TAUM TAUN TAUPE TAUPO TAUR TE TEA TEAD TEAISH TEAISM TEAL TEAM TEAN TEAP TEAR TED TEDIUM TEG TEGUA TEGULA TEHSIL TEIL TEIND TELANG TELAR TELI TELIUM TELSON TEMAN TEMIN TEMP TEMPI TEMPO TEN TENAI TEND TENG TENGU TENIO TENOR TENSOR TENUIS TEOPAN TEPAL TEPID TEPOR TERA TERAP TERAS TERBIA TERGAL TERGUM TERM TERMA TERMIN TERMON TERN TERNA TERNAL TERP TERPIN TH THA THALER THAN THANE THAPES THAR THARM THE THEB THEGN THEIR THEIRN THEIRS THEISM THEM THEMA THEMIS THEN THENAL THENAR THERM THERMO THIG THIN THINE THING THIO THIOL THIR THIRD THIRL THIS THISN THO THOB THOLE THOLI THOLUS THON THONE THONG THORAL THORE THORIA THORN THORP THOSE THOU THOUSE THRAEP THRAIL THRAIN THRAM THRANG THRAP THREAD THREAP THRIMP THRING THRIP THRIPS THRO THROB THROE THRONE THRONG THROU THRUM THUD THUG THULIA THULIR THULR THUMB THUMP THUNG THUNGE THURL THURM THURSE THUS TI TIANG TIAO TIAR TIB TID TIDAL TIDE TIE TIED TIEN TIER TIG TIGE TIGER TIGNUM TIL TILDE TILE TILED TILER TILMUS TILPAH TIMAR TIMBAL TIMBE TIMBER TIMBO TIMBRE TIME TIMED TIMER TIMES TIMON TIMOR TIN TIND TINDAL TINDER TINE TINEA TINEAL TINED TING TINGE TINGED TINGER TINGLE TINOSA TINSEL TIP TIPE TIPLE TIPMAN TIRADE TIRE TIRED TIRL TIRMA TISANE TISAR TO TOA TOAD TOADER TOBE TOBINE TOBIRA TOD TODE TOE TOED TOG TOGA TOGAED TOGS TOGUE TOHER TOI TOIL TOILED TOILER TOISE TOL TOLAN TOLANE TOLD TOLE TOLU TOM TOMAN TOMB TOMBAL TOMBE TOME TOMIAL TOMIN TOMISH TON TONAL TONE TONED TONER TONG TONGA TONGER TONGS TONGUE TONISH TONSIL TONUS TOP TOPE TOPENG TOPER TOPH TOPHUS TOPI TOPIA TOPMAN TOPS TOPSL TOR TORA TORAH TORAL TORAN TORE TORED TORMA TORMEN TORN TORNAL TORNUS TORPID TORSE TORSEL TORU TORULA TORUS TOSH TOSHER TOU TOUG TOUGH TOULD TOUP TOUR TOURN TOUSE TOUSER TOUSLE TRA TRADE TRAG TRAGI TRAGUS TRAH TRAIL TRAIN TRAM TRAME TRAMP TRAP TRAPES TRAPS TRASH TREAD TREND TREPAN TREPID TRI TRIAD TRIAGE TRIAL TRIBAL TRIBE TRIED TRIENS TRIG TRIGON TRIM TRIN TRINAL TRINE TRINOL TRIO TRIODE TRIOLE TRIOSE TRIP TRIPAL TRIPE TRIPEL TRIPLE TRIPOD TRIPOS TRISUL TRIUNE TROD TRODE TROG TROGS TROGUE TROMBA TROMBE TROMP TROMPE TRON TRONA TRONE TROPAL TROPE TROPHI TROUGH TROUPE TROUSE TRUB TRUDGE TRUE TRUG TRUISH TRUISM TRUMP TRUMPH TRUN TRUSH TSAR TSIA TSINE TSUBA TSUBO TSUN TU TUA TUAN TUARN TUB TUBA TUBAE TUBAGE TUBAL TUBAR TUBE TUBER TUBIG TUBING TUBMAN TUDEL TUE TUG TUGHRA TUGMAN TUI TUISM TULA TULARE TULASI TULE TULIP TULSI TUM TUMBLE TUME TUMID TUMOR TUMP TUN TUNA TUND TUNDER TUNDRA TUNE TUNED TUNER TUNG TUNGO TUNISH TUNO TUP TUPELO TUPMAN TUR TURB TURBAN TURBEH TURBID TURBO TURD TURGID TURIO TURION TURM TURMA TURN TURNED TURNEL TURNIP TURNS TURP TURPID TURPS TURSE TURSIO TUSH TUSHED TUSHER UANG UBI UDAL UDALER UDASI UDO UG UGH UGSOME UHLAN UINAL ULA ULE ULEMA ULMIN ULMO ULNA ULNAD ULNAE ULNAR ULNARE ULOID ULSTER ULTIMA ULTIMO ULTRA UM UMBEL UMBER UMBLE UMBO UMBONE UMBRA UMBRAE UMBRAL UMBREL UMBRIL UME UMP UMPH UMPIRE UN UNABLE UNAGED UNAL UNAMO UNAPT UNARM UNBAG UNBAIT UNBALE UNBAR UNBARE UNBASE UNBE UNBEAR UNBED UNBELT UNBET UNBIAS UNBID UNBIT UNBLED UNBOAT UNBOG UNBOLD UNBOLT UNBRED UNDAM UNDATE UNDE UNDEAR UNDER UNDIES UNDIG UNDIM UNDO UNDOER UNDOG UNDOSE UNDRAB UNDRAG UNEATH UNEMPT UNGARO UNGEAR UNGELT UNGET UNGILD UNGILT UNGIRD UNGIRT UNGLAD UNGOD UNGOLD UNGOT UNGRIP UNHAD UNHAIR UNHAP UNHARD UNHASP UNHAT UNHATE UNHEAD UNHEAL UNHELD UNHELM UNHERD UNHERO UNHID UNHIDE UNHIT UNHOED UNHOLD UNHOME UNHOSE UNHOT UNIAT UNIATE UNIBLE UNIDLE UNIE UNIO UNIPED UNIPOD UNIT UNITAL UNITE UNITED UNITER UNLADE UNLAID UNLAME UNLAP UNLASH UNLATH UNLEAD UNLED UNLET UNLID UNLIE UNLIMB UNLIME UNLIMP UNLIST UNLIT UNLOAD UNLORD UNLOST UNMAD UNMADE UNMAID UNMAIL UNMAST UNMATE UNMESH UNMET UNMIST UNMOLD UNODE UNOIL UNOLD UNOPED UNPAID UNPALE UNPEG UNPILE UNPLAT UNPOT UNPRIM UNRAM UNRASH UNREAD UNREAL UNRED UNREST UNRID UNRIDE UNRIG UNRIP UNRIPE UNROBE UNROPE UNSAD UNSAGE UNSAID UNSALT UNSEAL UNSEAM UNSEAT UNSET UNSHED UNSHIP UNSHOD UNSHOE UNSHOP UNSHOT UNSLIP UNSLIT UNSLOT UNSOIL UNSOLD UNSOLE UNSOME UNSORE UNSORT UNSPAR UNSPED UNSPIT UNSPOT UNSTAR UNSTEP UNSTOP UNTAME UNTAP UNTAR UNTEAM UNTIE UNTIED UNTIL UNTILE UNTIRE UNTO UNTOLD UNTOMB UNTOP UNTRIG UNTRIM UNTROD UP UPARM UPAS UPBAR UPBEAR UPBEAT UPBELT UPBEND UPBID UPBIND UPBOIL UPBOLT UPBRED UPBRIM UPDART UPDATE UPDO UPDOME UPDRAG UPEAT UPEND UPGALE UPGET UPGIRD UPGIRT UPGO UPHAND UPHANG UPHEAL UPHELD UPHELM UPHER UPHOLD UPLA UPLAID UPLAND UPLANE UPLEAD UPLEG UPLIMB UPLINE UPLOAD UPLONG UPMAST UPMOST UPO UPON UPREIN UPREND UPREST UPRID UPRISE UPRIST UPROAD UPROSE UPSEAL UPSEND UPSET UPSHOT UPSIDE UPSIT UPSOAR UPSTEM UPSTIR UPTEAR UPTEND UPTIDE UPTIE UPTORN UR URA URAL URALI URAMIL URAN URAO URASE URATE URBAN URBANE URBIAN URD URDE URE UREA UREAL UREDO UREID UREIDO UREMIA URENT URETAL URGE URGENT URIAL URINAL URINE URITE URLED URLING URMAN URN URNA URNAE URNAL URNISM URSAL URSINE URSOID URSON URSONE US USABLE USAGE USAGER USAR USARON USE USED USEDNT USENT USER USH USHER USNEA UST USTER USTION UT UTA UTAI UTAS UTERI UTILE UTINAM UTOPIA WING".split(" "))
+
+/* Word letters distributed across BOTH layers — bottom tiles are uncovered as tops are removed.
+   Layout: 2 top tiles cover 2 bottom tiles; tap order alternates layers. */
+/* Boards now use the actual game's grid layout + blocking:
+   - Each layer is a 4×3 grid (col 0..3 × row 0..2)
+   - Top tile at (col, row) blocks bottom tiles at (col-1,row), (col,row), (col-1,row+1), (col,row+1)
+   - Half-tile down-left offset between layers (skill's spec)
+   - Partial fill (some grid cells empty) for visual interest
+   blockedBy is auto-computed from the rule via buildBlockedBy(). */
+
+const MAIN_BOARD = {
+  tiles: [
+    /* Tutorial: top NEST (row 0), bottom BIRD (row 0) — 1 row per layer */
+    {id:'b', letter:'B', layer:0, row:0, col:0},
+    {id:'i', letter:'I', layer:0, row:0, col:1},
+    {id:'r', letter:'R', layer:0, row:0, col:2},
+    {id:'d', letter:'D', layer:0, row:0, col:3},
+    {id:'n', letter:'N', layer:1, row:0, col:0},
+    {id:'e', letter:'E', layer:1, row:0, col:1},
+    {id:'s', letter:'S', layer:1, row:0, col:2},
+    {id:'t', letter:'T', layer:1, row:0, col:3},
+  ],
+};
+
+/* Free-play 4×3 with partial fill — 6 top + 9 bottom = 15 tiles.
+   Top in middle 2 cols (cols 1,2), bottom in left 3 cols (cols 0,1,2).
+   Starting accessible: 6 top tiles (E T R A N I) — hundreds of words.
+   Bottom layer (D L O G H U P S M) uncovers as tops are submitted. */
+const FREEPLAY_BOARD = {
+  tiles: [
+    /* Bottom layer (layer 0) — 9 tiles in cols 0..2 × rows 0..2 */
+    {id:'fd', letter:'D', layer:0, row:0, col:0},
+    {id:'fl', letter:'L', layer:0, row:0, col:1},
+    {id:'fo', letter:'O', layer:0, row:0, col:2},
+    {id:'fg', letter:'G', layer:0, row:1, col:0},
+    {id:'fh', letter:'H', layer:0, row:1, col:1},
+    {id:'fu', letter:'U', layer:0, row:1, col:2},
+    {id:'fp', letter:'P', layer:0, row:2, col:0},
+    {id:'fs', letter:'S', layer:0, row:2, col:1},
+    {id:'fm', letter:'M', layer:0, row:2, col:2},
+    /* Top layer (layer 1) — 6 tiles in middle (cols 1,2 × rows 0..2) */
+    {id:'fe', letter:'E', layer:1, row:0, col:1},
+    {id:'ft', letter:'T', layer:1, row:0, col:2},
+    {id:'fr', letter:'R', layer:1, row:1, col:1},
+    {id:'fa', letter:'A', layer:1, row:1, col:2},
+    {id:'fn', letter:'N', layer:1, row:2, col:1},
+    {id:'fi', letter:'I', layer:1, row:2, col:2},
+  ],
+};
+
+/* Auto-compute blockedBy from the skill's rule:
+   A higher-layer tile at (col, row) blocks the lower-layer tile at (col-1,row), (col,row),
+   (col-1,row+1), or (col,row+1). For each lower tile, find all higher tiles whose blocking
+   range covers it. */
+function buildBlockedBy(tiles) {
+  tiles.forEach(t => { t.blockedBy = []; });
+  for (const lower of tiles) {
+    for (const higher of tiles) {
+      if (higher.layer !== lower.layer + 1) continue;
+      const dx = lower.col - higher.col;     /* lower at (c-1,r) → dx=-1; (c,r) → dx=0 */
+      const dy = lower.row - higher.row;     /* lower at (c,r) → dy=0; (c,r+1) → dy=+1 */
+      if ((dx === -1 || dx === 0) && (dy === 0 || dy === 1)) {
+        lower.blockedBy.push(higher.id);
+      }
+    }
+  }
+  return tiles;
+}
+
+const TUTORIAL_TARGET = 'NEST';
+const FREEPLAY_TARGETS = ['BIRD'];   /* second tutorial word, then transition to FREEPLAY_BOARD */
+const MIN_WORD_LEN = 3;
+
+function buildTiles(config) {
+  const tiles = config.tiles.map(t => ({ ...t, removed: false }));
+  buildBlockedBy(tiles);
+  /* seed wasAccessible to current accessibility so initial render does not flip */
+  tiles.forEach(t => {
+    t.wasAccessible = t.blockedBy.length === 0;
+  });
+  return tiles;
+}
+
+/* ============================================================ Render ============================================================ */
+const board = document.getElementById('board');
+const wordOutput = document.getElementById('wordOutput');
+const banner = document.getElementById('banner');
+const arrow = document.getElementById('arrow');
+const scorePop = document.getElementById('scorePop');
+
+function tileEl(letter, layerClass, dataAttrs) {
+  const el = document.createElement('div');
+  el.className = 'tile ' + layerClass;
+  Object.keys(dataAttrs).forEach(k => el.dataset[k] = dataAttrs[k]);
+  const letterEl = document.createElement('span');
+  letterEl.textContent = letter;
+  const ptsEl = document.createElement('span');
+  ptsEl.className = 'points';
+  ptsEl.textContent = pts(letter);
+  el.appendChild(letterEl);
+  el.appendChild(ptsEl);
+  return el;
+}
+
+function isAccessible(tile) {
+  if (tile.removed) return false;
+  return tile.blockedBy.every(blockerId => {
+    const blocker = STATE.tiles.find(t => t.id === blockerId);
+    return blocker && blocker.removed;
+  });
+}
+
+/* Layout constants — tiles are 56×86 (taller than wide).
+   Col pitch tracks tile width, row pitch tracks tile height. */
+const TILE_WIDTH = 56;
+const TILE_HEIGHT = 86;
+const COL_PITCH = 60;     /* tile width 56 + 4px gap */
+const ROW_PITCH = 90;     /* tile height 86 + 4px gap (row pitch > col pitch because tile is tall) */
+/* Aliases for legacy refs */
+const TILE_W = COL_PITCH;
+const TILE_PITCH_Y = ROW_PITCH;
+const BOARD_WIDTH = 360;
+
+/* Renderer — pixel position uses half-tile offset between layers, matching the
+   actual game's "upper layer offset down-left by half a tile" convention.
+   Layer L tile at grid (col, row) renders at pixel:
+     x = (col - L * 0.5) * TILE_W
+     y = (row - L * 0.5) * TILE_PITCH_Y       (negative = up — top layer above bottom)
+   Higher layers thus appear up-and-right (in pixel space, "up" is smaller y; "left" of the rule
+   refers to game-grid convention which corresponds to up-right visually).  */
+function renderBoard() {
+  board.innerHTML = '';
+  STATE.tiles.forEach(t => { if (t.row === undefined) t.row = 0; });
+
+  /* Compute pixel positions for ALL tiles (including removed) so the layout stays
+     anchored as tiles are cleared — bottom layer must NOT shift when top clears.
+     Upper layers offset DOWN-LEFT (skill spec):
+       px = (col - layer*0.5) * COL_PITCH   // higher layer → shifted left
+       py = (row + layer*0.5) * ROW_PITCH   // higher layer → shifted DOWN */
+  const allPositions = STATE.tiles.map(t => ({
+    t,
+    px: (t.col - t.layer * 0.5) * TILE_W,
+    py: (t.row + t.layer * 0.5) * TILE_PITCH_Y
+  }));
+  if (allPositions.length === 0) return;
+  const minPx = Math.min(...allPositions.map(p => p.px));
+  const maxPx = Math.max(...allPositions.map(p => p.px));
+  const minPy = Math.min(...allPositions.map(p => p.py));
+
+  /* Center horizontally; anchor top vertically — bounds use ALL tiles so they're stable */
+  const totalW = (maxPx - minPx) + TILE_WIDTH;
+  const startX = (BOARD_WIDTH - totalW) / 2 - minPx;
+  const startY = -minPy;
+
+  /* Draw lower layers first so higher layers paint on top */
+  const visiblePositions = allPositions.filter(p => !p.t.removed);
+  if (visiblePositions.length === 0) return;
+  const sorted = visiblePositions.slice().sort((a, b) => a.t.layer - b.t.layer);
+  sorted.forEach(({ t, px, py }) => {
+    const accessible = isAccessible(t);
+    const justUnlocked = accessible && !t.wasAccessible;
+    t.wasAccessible = accessible;
+    const cls = accessible ? 'layer-1' : 'layer-0';
+    const el = tileEl(t.letter, cls, { id: t.id, letter: t.letter });
+    el.style.left = (startX + px) + 'px';
+    el.style.top  = (startY + py) + 'px';
+    if (STATE.selected.includes(t.id)) el.classList.add('selected');
+    if (justUnlocked) el.classList.add('unlocking');
+    if (accessible) {
+      el.addEventListener('click', () => onTileTap(t.id));
+      el.style.zIndex = 10 + t.layer;
+    } else {
+      el.style.zIndex = 4 + t.layer;
+    }
+    board.appendChild(el);
+  });
+}
+
+function renderWordOutput(targetLen) {
+  wordOutput.innerHTML = '';
+  for (let i = 0; i < targetLen; i++) {
+    const s = document.createElement('div');
+    s.className = 'word-slot';
+    s.dataset.slotIdx = i;
+    s.innerHTML = '<span class="ws-letter"></span><span class="ws-pts"></span>';
+    s.addEventListener('click', () => onTraySlotTap(i));
+    wordOutput.appendChild(s);
+  }
+}
+
+/* Tap a filled tray slot — deselect that tile (only the last in the row, to keep
+   the word readable; tapping a middle one is ignored). */
+function onTraySlotTap(slotIdx) {
+  if (STATE.locked || STATE.phase === 'end') return;
+  if (slotIdx >= STATE.selected.length) return;
+  if (slotIdx !== STATE.selected.length - 1) return;
+  const id = STATE.selected[slotIdx];
+  flyTrayToBoard(id, slotIdx);
+  STATE.selected.pop();
+  updateAfterSelectionChange();
+}
+
+function updateWordOutput() {
+  const slots = wordOutput.querySelectorAll('.word-slot');
+  let pointsTotal = 0;
+  STATE.selected.forEach((id, i) => {
+    const t = STATE.tiles.find(x => x.id === id);
+    if (slots[i] && t) {
+      slots[i].querySelector('.ws-letter').textContent = t.letter;
+      slots[i].querySelector('.ws-pts').textContent = pts(t.letter);
+      slots[i].classList.add('filled');
+      pointsTotal += pts(t.letter);
+    }
+  });
+  for (let i = STATE.selected.length; i < slots.length; i++) {
+    slots[i].querySelector('.ws-letter').textContent = '';
+    slots[i].querySelector('.ws-pts').textContent = '';
+    slots[i].classList.remove('filled');
+  }
+  document.getElementById('ptsNum').textContent = pointsTotal;
+}
+
+/* ============================================================ Fly-to-tray animation ============================================================ */
+function flyTile(letter, fromRect, toRect, durationMs) {
+  if (!fromRect || !toRect) return;
+  const flyer = document.createElement('div');
+  flyer.className = 'tile-flyer';
+  flyer.style.left = fromRect.left + 'px';
+  flyer.style.top  = fromRect.top  + 'px';
+  flyer.style.width  = fromRect.width  + 'px';
+  flyer.style.height = fromRect.height + 'px';
+  const lEl = document.createElement('span');
+  lEl.textContent = letter;
+  const pEl = document.createElement('span');
+  pEl.style.cssText = 'font-size:11px;font-weight:700;margin-top:6px;line-height:1;';
+  pEl.textContent = pts(letter);
+  flyer.appendChild(lEl);
+  flyer.appendChild(pEl);
+  document.body.appendChild(flyer);
+  const dx = (toRect.left + toRect.width/2) - (fromRect.left + fromRect.width/2);
+  const dy = (toRect.top  + toRect.height/2) - (fromRect.top  + fromRect.height/2);
+  const scale = toRect.width / fromRect.width;
+  requestAnimationFrame(() => {
+    flyer.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+  });
+  setTimeout(() => flyer.remove(), durationMs || 300);
+}
+
+function flyBoardToTray(tileId, slotIdx) {
+  const boardEl = board.querySelector(`[data-id="${tileId}"]`);
+  const slot = wordOutput.querySelectorAll('.word-slot')[slotIdx];
+  if (!boardEl || !slot) return;
+  const tile = STATE.tiles.find(t => t.id === tileId);
+  flyTile(tile.letter, boardEl.getBoundingClientRect(), slot.getBoundingClientRect(), 300);
+}
+
+function flyTrayToBoard(tileId, slotIdx) {
+  const slot = wordOutput.querySelectorAll('.word-slot')[slotIdx];
+  const boardEl = board.querySelector(`[data-id="${tileId}"]`);
+  if (!boardEl || !slot) return;
+  const tile = STATE.tiles.find(t => t.id === tileId);
+  flyTile(tile.letter, slot.getBoundingClientRect(), boardEl.getBoundingClientRect(), 300);
+}
+
+/* ============================================================ Tap handling ============================================================ */
+function onTileTap(id) {
+  if (STATE.locked || STATE.phase === 'end') return;
+  const tile = STATE.tiles.find(t => t.id === id);
+  if (!tile || tile.removed) return;
+
+  /* Toggle: if already selected, deselect (only if it's the last selected, to keep order valid) */
+  const idx = STATE.selected.indexOf(id);
+  if (idx >= 0) {
+    if (idx === STATE.selected.length - 1) {
+      flyTrayToBoard(id, idx);
+      STATE.selected.pop();
+    } else return; /* tapping a middle-selected tile does nothing */
+    updateAfterSelectionChange();
+    return;
+  }
+
+  if (!isAccessible(tile)) {
+    /* shake — blocked */
+    const el = board.querySelector(`[data-id="${id}"]`);
+    if (el) el.animate(
+      [{transform:'translateX(0)'},{transform:'translateX(-4px)'},{transform:'translateX(4px)'},{transform:'translateX(0)'}],
+      {duration: 240, easing: 'ease-out'}
+    );
+    return;
+  }
+
+  const newSlotIdx = STATE.selected.length;
+  STATE.selected.push(id);
+  flyBoardToTray(id, newSlotIdx);
+  updateAfterSelectionChange();
+
+  if (STATE.phase === 'tutorial' || STATE.phase === 'tutorial2') {
+    const word = currentWord();
+    if (word.length > 0 && word === STATE.targetWord) {
+      hideArrow();
+      pointArrowAtSubmit();
+    } else if (STATE.targetWord.startsWith(word)) {
+      pointToNextTutorialLetter();
+    } else {
+      setTimeout(clearSelection, 350);
+    }
+  }
+}
+
+function updateAfterSelectionChange() {
+  renderBoard();
+  updateWordOutput();
+  const word = currentWord();
+  const valid = (word.length > 0 && word === STATE.targetWord) || (word.length >= MIN_WORD_LEN && VALID_WORDS.has(word));
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.classList.toggle('ready', valid);
+}
+
+function currentWord() {
+  return STATE.selected.map(id => STATE.tiles.find(t => t.id === id).letter).join('');
+}
+
+function clearSelection() {
+  STATE.selected = [];
+  updateAfterSelectionChange();
+  if (STATE.phase === 'tutorial') pointToNextTutorialLetter();
+}
+
+function onSubmit() {
+  if (STATE.locked) return;
+  const word = currentWord();
+  const valid = (word.length > 0 && word === STATE.targetWord) || (word.length >= MIN_WORD_LEN && VALID_WORDS.has(word));
+  if (!valid) {
+    /* shake the selection bar */
+    const bar = document.querySelector('.word-output');
+    bar.animate(
+      [{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}],
+      {duration: 280, easing: 'ease-out'}
+    );
+    return;
+  }
+  /* Animate selected tiles flying off, then remove them and re-render */
+  STATE.locked = true;
+  STATE.selected.forEach(id => {
+    const el = board.querySelector(`[data-id="${id}"]`);
+    if (el) el.classList.add('removing');
+  });
+  burstFeathers();
+  showScorePop('+' + (10 * word.length));
+
+  setTimeout(() => {
+    STATE.selected.forEach(id => {
+      const t = STATE.tiles.find(x => x.id === id);
+      if (t) t.removed = true;
+    });
+    STATE.selected = [];
+    STATE.wordsCompleted++;
+    renderBoard();
+    updateWordOutput();
+    document.getElementById('submitBtn').classList.remove('ready', 'hint');
+    hideArrow();
+    STATE.locked = false;
+
+    /* Phase progression:
+       tutorial → tutorial2 (after NEST submitted, BIRD becomes target)
+       tutorial2 → freeplay (after BIRD submitted, load bigger pyramid board)
+       freeplay → end (after several words OR board nearly empty) */
+    if (STATE.phase === 'tutorial') {
+      STATE.phase = 'tutorial2';
+      banner.innerHTML = 'Nice! Now spell <span class="target">' + FREEPLAY_TARGETS[0] + '</span><span class="hint-line">The board uncovered new letters</span>';
+      STATE.targetWord = FREEPLAY_TARGETS[0];
+      renderWordOutput(STATE.targetWord.length);
+      setTimeout(() => pointToNextTutorialLetter(), 400);
+    } else if (STATE.phase === 'tutorial2') {
+      loadFreePlayBoard();
+    } else if (STATE.phase === 'freeplay') {
+      const remaining = STATE.tiles.filter(t => !t.removed).length;
+      const accessibleLetters = STATE.tiles.filter(t => !t.removed && isAccessible(t)).map(t => t.letter);
+      const stillPlayable = countPlayableWords(accessibleLetters);
+      if (STATE.wordsCompleted >= 6 || remaining < 2 || stillPlayable.length === 0) {
+        showEndCard();
+      } else {
+        banner.innerHTML = 'Nice! <span class="hint-line">Keep going — find another word</span>';
+        renderWordOutput(6);
+      }
+    }
+  }, 600);
+}
+
+function loadFreePlayBoard() {
+  STATE.phase = 'freeplay';
+  STATE.locked = false;
+  STATE.selected = [];
+  STATE.targetWord = '';
+  STATE.tiles = buildTiles(FREEPLAY_BOARD);
+  banner.innerHTML = 'Spell <span class="target">any word</span><span class="hint-line">2+ letters — uncover more by clearing tops</span>';
+  renderBoard();
+  renderWordOutput(6);
+  hideArrow();
+  /* Light difficulty hint — log how many words can be spelled from starting accessible letters */
+  if (typeof console !== 'undefined') {
+    const startLetters = STATE.tiles.filter(t => isAccessible(t)).map(t => t.letter);
+    const playable = countPlayableWords(startLetters);
+    console.log('[Sparrows playable] Free-play start letters:', startLetters.join(''),
+                '| Spellable dict words from start:', playable.length,
+                '| Top examples:', playable.slice(0, 8));
+  }
+}
+
+/* Difficulty hint helper: enumerate dict words spellable from a multiset of letters.
+   Doesn't account for layer ordering (just upper bound) but useful for sanity checking
+   that a generated board has enough word options. */
+function countPlayableWords(letterMultiset) {
+  const counts = {};
+  letterMultiset.forEach(c => counts[c] = (counts[c] || 0) + 1);
+  const playable = [];
+  for (const word of VALID_WORDS) {
+    if (word.length < MIN_WORD_LEN) continue;
+    const wc = {};
+    for (const c of word) wc[c] = (wc[c] || 0) + 1;
+    let ok = true;
+    for (const c in wc) if ((counts[c] || 0) < wc[c]) { ok = false; break; }
+    if (ok) playable.push(word);
+  }
+  return playable.sort((a, b) => b.length - a.length);
+}
+
+function pointToNextTutorialLetter() {
+  const word = currentWord();
+  const next = STATE.targetWord[word.length];
+  if (!next) return;
+  const candidate = STATE.tiles.find(t => !t.removed && t.letter === next && isAccessible(t) && !STATE.selected.includes(t.id));
+  if (!candidate) return;
+  const el = board.querySelector(`[data-id="${candidate.id}"]`);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  arrow.style.left = (r.left + r.width/2 - 18) + 'px';
+  arrow.style.top  = (r.top - 38) + 'px';
+  arrow.classList.add('visible');
+  board.querySelectorAll('.tile.hint').forEach(t => t.classList.remove('hint'));
+  el.classList.add('hint');
+}
+
+function pointArrowAtSubmit() {
+  const submitBtn = document.getElementById('submitBtn');
+  submitBtn.classList.add('hint');
+  /* Hide top-of-tile arrow */
+  arrow.classList.remove('visible');
+}
+
+function hideArrow() {
+  arrow.classList.remove('visible');
+  board.querySelectorAll('.tile.hint').forEach(t => t.classList.remove('hint'));
+}
+
+
+function burstFeathers() {
+  const stage = document.getElementById('stage');
+  const cx = stage.clientWidth / 2;
+  const cy = stage.clientHeight * 0.30;
+  for (let i = 0; i < 14; i++) {
+    const f = document.createElement('div');
+    f.className = 'feather';
+    f.style.left = cx + 'px';
+    f.style.top = cy + 'px';
+    const angle = (Math.PI * 2 * i / 14) + (Math.random() * 0.4);
+    const dist = 90 + Math.random() * 60;
+    f.style.setProperty('--dx', Math.cos(angle) * dist + 'px');
+    f.style.setProperty('--dy', Math.sin(angle) * dist + 'px');
+    f.style.setProperty('--r', (Math.random() * 720 - 360) + 'deg');
+    stage.appendChild(f);
+    requestAnimationFrame(() => f.classList.add('burst'));
+    setTimeout(() => f.remove(), 1300);
+  }
+}
+
+function showScorePop(text) {
+  scorePop.textContent = text;
+  scorePop.classList.remove('show');
+  void scorePop.offsetWidth;
+  scorePop.classList.add('show');
+}
+
+function showEndCard() {
+  STATE.phase = 'end';
+  document.getElementById('endcard').classList.add('show');
+}
+document.getElementById('installBtn').addEventListener('click', window._sparrowsClick);
+document.getElementById('endcard').addEventListener('click', function(e) {
+  if (e.target.id === 'installBtn') return;
+  window._sparrowsClick();
+});
+
+/* Lay out bg.png (1080×3102) anchored to bottom-center of stage with cover scaling,
+   then place birdhouses at the supplied red-dot hook positions, with each house's
+   roof-peak anchor aligned to its dot and its swing pivot at the same point. */
+const BG_NAT = { w: 1080, h: 3102 };
+const HOUSES = [
+  /* dot positions found in bg-houseplacements.png; anchors found in *-anchor.png */
+  { id: 'house1', dot: [903, 828],  size: [242, 494], anchor: [100, 6] },
+  { id: 'house2', dot: [241, 2011], size: [329, 440], anchor: [164, 6] },
+];
+function layoutBackground() {
+  const stage = document.getElementById('stage');
+  const sw = stage.clientWidth, sh = stage.clientHeight;
+  if (!sw || !sh) return;
+  const scale = Math.max(sw / BG_NAT.w, sh / BG_NAT.h);   /* cover */
+  const drawW = BG_NAT.w * scale, drawH = BG_NAT.h * scale;
+  const offX = (sw - drawW) / 2;                          /* center horizontally */
+  const offY = sh - drawH;                                /* anchor bottom */
+  /* pan range — how far the world can travel down before its top edge enters view */
+  stage.style.setProperty('--pan-max', Math.max(0, drawH - sh) + 'px');
+  const bg = document.getElementById('bgImg');
+  bg.style.left = offX + 'px';
+  bg.style.top  = offY + 'px';
+  bg.style.width  = drawW + 'px';
+  bg.style.height = drawH + 'px';
+  HOUSES.forEach(h => {
+    const el = document.getElementById(h.id);
+    const w = h.size[0] * scale;
+    const hgt = h.size[1] * scale;
+    /* place so the anchor pixel inside the house lands on the dot in the bg */
+    const dotX = offX + h.dot[0] * scale;
+    const dotY = offY + h.dot[1] * scale;
+    const ax = h.anchor[0] * scale;
+    const ay = h.anchor[1] * scale;
+    el.style.width  = w + 'px';
+    el.style.height = hgt + 'px';
+    el.style.left = (dotX - ax) + 'px';
+    el.style.top  = (dotY - ay) + 'px';
+    /* swing pivot = same anchor point */
+    el.style.transformOrigin = ax + 'px ' + ay + 'px';
+  });
+}
+
+function init() {
+  layoutBackground();
+  window.addEventListener('resize', layoutBackground);
+  /* In case bg.png is still loading on first call */
+  const bg = document.getElementById('bgImg');
+  if (bg && !bg.complete) bg.addEventListener('load', layoutBackground);
+
+  STATE.targetWord = TUTORIAL_TARGET;
+  STATE.tiles = buildTiles(MAIN_BOARD);
+  renderBoard();
+  renderWordOutput(STATE.targetWord.length);
+  setTimeout(pointToNextTutorialLetter, 600);
+
+  document.getElementById('submitBtn').addEventListener('click', onSubmit);
+  document.getElementById('clearBtn').addEventListener('click', clearSelection);
+  /* No force-end timer — Unity Ads container handles skip/close UI itself */
+}
+
+if (document.readyState === 'complete' || document.readyState === 'interactive') init();
+else document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
