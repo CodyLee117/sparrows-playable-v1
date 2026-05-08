@@ -373,9 +373,37 @@
   .install:active { transform: translateY(2px); box-shadow: 0 2px 0 #8C6628, 0 3px 8px rgba(0,0,0,0.3); }
   @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.04); } }
 
-  #endcard .bird { position: absolute; }
-  #endcard .bird.eb1 { top: 14%; left: 14%; width: 42px; height: 80px; background-image: url('assets/birds/bird_orange.png'); animation: idleBobble 2s ease-in-out infinite; }
-  #endcard .bird.eb2 { top: 14%; right: 14%; width: 70px; height: 88px; background-image: url('assets/birds/bird_gray.png'); animation: idleBobble2 2.3s ease-in-out infinite; }
+  #endcard .bird {
+    position: absolute;
+    background-repeat: no-repeat;
+    background-size: contain;
+    pointer-events: none;
+  }
+  /* Sitting bird (left) — gentle bobble. SVG native 67×109. */
+  #endcard .bird.eb1 {
+    top: 18%; left: 10%;
+    width: 80px; height: 130px;
+    background-image: url('assets/svg/bird-sitting.svg');
+    transform-origin: 50% 100%;
+    animation: sitBobble 2.4s ease-in-out infinite;
+  }
+  /* Construction bird (right) — hammers. SVG native 82×112. */
+  #endcard .bird.eb2 {
+    top: 18%; right: 8%;
+    width: 96px; height: 132px;
+    background-image: url('assets/svg/bird-construction.svg');
+    transform-origin: 50% 100%;
+    animation: hammer 1.4s ease-in-out infinite;
+  }
+  @keyframes sitBobble {
+    0%,100% { transform: translateY(0) rotate(0deg); }
+    50%     { transform: translateY(-3px) rotate(-2deg); }
+  }
+  @keyframes hammer {
+    0%,60%,100% { transform: rotate(0deg); }
+    70%         { transform: rotate(-10deg) translateX(-3px); }
+    80%         { transform: rotate(0deg); }
+  }
 </style>
 </head>
 <body>
